@@ -1,0 +1,31 @@
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include "version.h"
+#include "version.rc"
+#include "res.h"
+
+IDI_MAIN ICON DISCARDABLE "main.ico"
+
+1 24 "manifest.xml"
+
+IDR_MENU MENU DISCARDABLE
+BEGIN
+    POPUP "&Edit"
+    BEGIN
+        MENUITEM "&Copy",               IDM_EDIT_COPY
+        MENUITEM SEPARATOR
+        MENUITEM "&Open File",          IDM_EDIT_REFRESH
+    END
+    POPUP "&Options"
+    BEGIN
+        MENUITEM "&Draw Gridlines",     IDM_OPTIONS_GRIDLINES
+        MENUITEM SEPARATOR
+        MENUITEM "&Options...",         IDM_OPTIONS_OPTIONS
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About...",           IDM_HELP_ABOUT
+    END
+    MENUITEM "Turn &Refresh Off!",      IDM_REFRESH_ONOFF
+END
+
