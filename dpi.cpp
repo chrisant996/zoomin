@@ -1,9 +1,11 @@
 // Copyright (c) 2023 Christopher Antos
 // License: http://opensource.org/licenses/MIT
 
-#include "main.h"
+#include <windows.h>
 #include <windowsx.h>
-#include <wincodec.h>
+#include <assert.h>
+
+#include "dpi.h"
 
 #ifndef ILC_COLORMASK
 #define ILC_COLORMASK   0x00FE

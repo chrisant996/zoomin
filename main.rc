@@ -14,7 +14,7 @@ BEGIN
     BEGIN
         MENUITEM "&Copy",               IDM_EDIT_COPY
         MENUITEM SEPARATOR
-        MENUITEM "&Open File",          IDM_EDIT_REFRESH
+        MENUITEM "&Refresh",            IDM_EDIT_REFRESH
     END
     POPUP "&Options"
     BEGIN
