@@ -188,6 +188,34 @@ void SizeTracker::OnDestroy()
 }
 
 //------------------------------------------------------------------------------
+// CreatePhysicalPalette.
+//
+// So palette-managed display devices can be rendered.
+
+static HPALETTE CreatePhysicalPalette()
+{
+    constexpr UINT c_num = 256;
+
+    PLOGPALETTE ppal = (PLOGPALETTE)LocalAlloc(LPTR, sizeof(*ppal) + sizeof(PALETTEENTRY) * c_num);
+    if (!ppal)
+        return NULL;
+
+    ppal->palVersion = 0x300; // Would be PALVERSION, but that's no longer present in Windows SDKs.
+    ppal->palNumEntries = c_num;
+
+    for (UINT ii = 0; ii < c_num; ++ii)
+    {
+        *((DWORD*)&ppal->palPalEntry[ii]) = ii;
+        ppal->palPalEntry[ii].peFlags = (BYTE)PC_EXPLICIT;
+    }
+
+    HPALETTE hpal = CreatePalette(ppal);
+    LocalFree(ppal);
+
+    return hpal;
+}
+
+//------------------------------------------------------------------------------
 // Main window.
 
 class Zoomin
@@ -227,6 +255,7 @@ private:
 
 private:
     HWND m_hwnd = NULL;
+    HPALETTE m_hpal = NULL;
     DpiScaler m_dpi;
     bool m_show_gridlines[2] = {};
     INT m_gridline_spacing[2] = {};
@@ -333,6 +362,12 @@ void Zoomin::OnDestroy()
     {
         WriteRegLong(c_show_gridlines_name[ii], m_show_gridlines[ii]);
         WriteRegLong(c_gridline_spacing_name[ii], m_gridline_spacing[ii]);
+    }
+
+    if (m_hpal)
+    {
+        DeleteObject(m_hpal);
+        m_hpal = NULL;
     }
 }
 
@@ -534,6 +569,8 @@ void Zoomin::Init()
         m_show_gridlines[ii] = !!ReadRegLong(c_show_gridlines_name[ii], false);
         m_gridline_spacing[ii] = ReadRegLong(c_gridline_spacing_name[ii], c_default_gridlines_spacing[ii]);
     }
+
+    m_hpal = CreatePhysicalPalette();
 }
 
 void Zoomin::SetZoomPoint(LPARAM lParam)
@@ -688,7 +725,13 @@ void Zoomin::PaintZoomRect(HDC hdc)
     const HDC hdcFrom = GetDC(NULL);
     const int bltmode = SetStretchBltMode(hdcTo, COLORONCOLOR);
 
-// TODO: palette management?
+    HPALETTE hpal;
+    if (m_hpal)
+    {
+        hpal = SelectPalette(hdcTo, m_hpal, false);
+        RealizePalette(hdcTo);
+    }
+
     StretchBlt(hdcTo, 0, 0, m_factor * m_area.cx, m_factor * m_area.cy,
                hdcFrom, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, SRCCOPY);
 
@@ -712,6 +755,11 @@ void Zoomin::PaintZoomRect(HDC hdc)
             SelectPen(hdcTo, hpenOld);
             DeleteObject(hpenLine);
         }
+    }
+
+    if (m_hpal)
+    {
+        SelectPalette(hdcTo, hpal, false);
     }
 
     SetStretchBltMode(hdcTo, bltmode);
