@@ -22,10 +22,8 @@
 #define IDM_OPTIONS_OPTIONS     2003
 #define IDM_HELP_ABOUT          2004
 #define IDM_REFRESH_ONOFF       2005
-#define IDM_MOVE_UP             2006
-#define IDM_MOVE_DOWN           2007
-#define IDM_MOVE_LEFT           2008
-#define IDM_MOVE_RIGHT          2009
+#define IDM_ZOOM_OUT            2006
+#define IDM_ZOOM_IN             2007
 
 // Controls.
 #define IDC_ENABLE_REFRESH      3000

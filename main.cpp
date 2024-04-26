@@ -15,7 +15,11 @@
 static const WCHAR c_reg_root[] = TEXT("Software\\chrisant996\\Zoomin");
 static const WCHAR c_wndclass_name[] = TEXT("ZoominMainWindow");
 
+constexpr INT c_min_zoom = 1;
+constexpr INT c_max_zoom = 32;
+
 static HINSTANCE g_hinst = 0;
+static HACCEL g_haccel = 0;
 
 template <typename T> T clamp(const T value, const T low, const T high)
 {
@@ -178,10 +182,13 @@ public:
 private:
     // Main functions.
     void OnCreate(HWND hwnd);
+    void OnDestroy();
     void OnPaint();
     void OnButtonDown(LPARAM lParam);
     void OnMouseMove(LPARAM lParam);
     void OnCancelMode();
+    void OnVScroll(WPARAM wParam);
+    void OnKeyDown(WPARAM wParam, LPARAM lParam);
     bool OnCommand(WORD id, WORD code, HWND hwndCtrl);
     void OnSize();
     void OnDpiChanged(const DpiScaler& dpi);
@@ -189,6 +196,9 @@ private:
     // Internal helpers.
     void Init();
     void SetZoomPoint(LPARAM lParam);
+    void SetZoomPoint(POINT pt);
+    void SetZoomFactor(INT factor);
+    void CalcZoomArea();
     void GetZoomArea(RECT& rc);
     void InvertReticle();
     void PaintZoomRect(HDC hdc=NULL);
@@ -198,7 +208,7 @@ private:
     DpiScaler m_dpi;
     POINT m_pt;
     SIZE m_area;
-    UINT m_factor = 4;
+    INT m_factor = 0;
     RECT m_rcMonitor;
     bool m_captured = false;
     SizeTracker m_sizeTracker;
@@ -227,7 +237,12 @@ LRESULT CALLBACK Zoomin::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         s_zoomin.OnCancelMode();
         break;
 
-// TODO: mouse ldown/move/lup to position zoom region.
+    case WM_VSCROLL:
+        s_zoomin.OnVScroll(wParam);
+        break;
+    case WM_KEYDOWN:
+        s_zoomin.OnKeyDown(wParam, lParam);
+        break;
 
     case WM_COMMAND:
         {
@@ -250,7 +265,7 @@ LRESULT CALLBACK Zoomin::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         s_zoomin.OnCreate(hwnd);
         goto LDefault;
     case WM_DESTROY:
-        s_zoomin.m_sizeTracker.OnDestroy();
+        s_zoomin.OnDestroy();
         break;
     case WM_NCDESTROY:
         PostQuitMessage(0);
@@ -272,6 +287,13 @@ void Zoomin::OnCreate(HWND hwnd)
     SendMessage(hwnd, WM_SETICON, true, LPARAM(LoadImage(g_hinst, MAKEINTRESOURCE(IDI_MAIN), IMAGE_ICON, 0, 0, 0)));
     SendMessage(hwnd, WM_SETICON, false, LPARAM(LoadImage(g_hinst, MAKEINTRESOURCE(IDI_MAIN), IMAGE_ICON, 16, 16, 0)));
     m_sizeTracker.OnCreate(hwnd);
+}
+
+void Zoomin::OnDestroy()
+{
+    WriteRegLong(TEXT("PointX"), m_pt.x);
+    WriteRegLong(TEXT("PointY"), m_pt.y);
+    WriteRegLong(TEXT("ZoomFactor"), m_factor);
 }
 
 void Zoomin::OnPaint()
@@ -320,6 +342,74 @@ void Zoomin::OnCancelMode()
     m_captured = false;
 }
 
+void Zoomin::OnVScroll(WPARAM wParam)
+{
+    INT factor = m_factor;
+
+    switch (LOWORD(wParam))
+    {
+    case SB_LINEUP:
+        --factor;
+        break;
+    case SB_LINEDOWN:
+        ++factor;
+        break;
+    case SB_PAGEUP:
+        factor -= 2;
+        break;
+    case SB_PAGEDOWN:
+        factor += 2;
+        break;
+    case SB_THUMBPOSITION:
+    case SB_THUMBTRACK:
+        factor = HIWORD(wParam);
+        break;
+    }
+
+    SetZoomFactor(factor);
+}
+
+void Zoomin::OnKeyDown(WPARAM wParam, LPARAM lParam)
+{
+    switch (wParam)
+    {
+    case VK_UP:
+    case VK_DOWN:
+    case VK_LEFT:
+    case VK_RIGHT:
+        {
+            const bool shift = (GetKeyState(VK_SHIFT) < 0);
+            const bool ctrl = (GetKeyState(VK_CONTROL) < 0);
+
+            POINT pt = m_pt;
+            switch (wParam)
+            {
+            case VK_UP:
+                if (ctrl) pt.y = m_rcMonitor.top;
+                else pt.y -= shift ? 8 : 1;
+                break;
+            case VK_DOWN:
+                if (ctrl) pt.y = m_rcMonitor.bottom - 1;
+                else pt.y += shift ? 8 : 1;
+                break;
+            case VK_LEFT:
+                if (ctrl) pt.x = m_rcMonitor.left;
+                else pt.x -= shift ? 8 : 1;
+                break;
+            case VK_RIGHT:
+                if (ctrl) pt.x = m_rcMonitor.right - 1;
+                else pt.x += shift ? 8 : 1;
+                break;
+            default:
+                return;
+            }
+
+            SetZoomPoint(pt);
+        }
+        break;
+    }
+}
+
 bool Zoomin::OnCommand(WORD id, WORD code, HWND hwndCtrl)
 {
     switch (id)
@@ -328,7 +418,7 @@ bool Zoomin::OnCommand(WORD id, WORD code, HWND hwndCtrl)
 // TODO: copy zoomed content to clipboard.
         break;
     case IDM_EDIT_REFRESH:
-// TODO: refresh zoomed content.
+        PaintZoomRect();
         break;
     case IDM_OPTIONS_GRIDLINES:
 // TODO: toggle gridlines.
@@ -343,11 +433,11 @@ bool Zoomin::OnCommand(WORD id, WORD code, HWND hwndCtrl)
 // TODO: toggle auto-refresh.
         break;
 
-    case IDM_MOVE_UP:
-    case IDM_MOVE_DOWN:
-    case IDM_MOVE_LEFT:
-    case IDM_MOVE_RIGHT:
-// TODO: move zoom region.
+    case IDM_ZOOM_OUT:
+        SetZoomFactor(m_factor - 1);
+        break;
+    case IDM_ZOOM_IN:
+        SetZoomFactor(m_factor + 1);
         break;
 
     default:
@@ -360,11 +450,7 @@ bool Zoomin::OnCommand(WORD id, WORD code, HWND hwndCtrl)
 void Zoomin::OnSize()
 {
     m_sizeTracker.OnSize();
-
-    RECT rc;
-    GetClientRect(m_hwnd, &rc);
-    m_area.cx = ((rc.right - rc.left) + m_factor - 1) / m_factor;
-    m_area.cy = ((rc.bottom - rc.top) + m_factor - 1) / m_factor;
+    CalcZoomArea();
 }
 
 void Zoomin::OnDpiChanged(const DpiScaler& dpi)
@@ -379,19 +465,34 @@ void Zoomin::Init()
     POINT pt;
     pt.x = ReadRegLong(TEXT("PointX"), MAXINT);
     pt.y = ReadRegLong(TEXT("PointY"), MAXINT);
-    SetZoomPoint(MAKELPARAM(pt.x, pt.y));
+    SetZoomPoint(pt);
 
-    m_factor = ReadRegLong(TEXT("ZoomFactor"), 4);
+    SetZoomFactor(ReadRegLong(TEXT("ZoomFactor"), 4));
 }
 
 void Zoomin::SetZoomPoint(LPARAM lParam)
 {
-    m_pt.x = SHORT(LOWORD(lParam));
-    m_pt.y = SHORT(HIWORD(lParam));
-    ClientToScreen(m_hwnd, &m_pt);
+    POINT pt;
+    pt.x = SHORT(LOWORD(lParam));
+    pt.y = SHORT(HIWORD(lParam));
+// TODO: handle DPI awareness.
+    ClientToScreen(m_hwnd, &pt);
+    SetZoomPoint(pt);
+}
+
+void Zoomin::SetZoomPoint(POINT pt)
+{
+    const bool invalid = (pt.x == MAXINT || pt.y == MAXINT);
+    if (invalid)
+    {
+        RECT rc;
+        GetWindowRect(m_hwnd, &rc);
+        pt.x = rc.left + (rc.right - rc.left) / 2;
+        pt.y = rc.top + (rc.bottom - rc.top) / 2;
+    }
 
     MONITORINFO mi = { sizeof(mi) };
-    HMONITOR hmon = MonitorFromPoint(m_pt, MONITOR_DEFAULTTONEAREST);
+    HMONITOR hmon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
     if (!GetMonitorInfo(hmon, &mi))
     {
         SetRectEmpty(&m_rcMonitor);
@@ -399,6 +500,50 @@ void Zoomin::SetZoomPoint(LPARAM lParam)
     }
 
     m_rcMonitor = mi.rcMonitor;
+
+    if (invalid)
+    {
+        pt.x = m_rcMonitor.left + (m_rcMonitor.right - m_rcMonitor.left) / 2;
+        pt.y = m_rcMonitor.top + (m_rcMonitor.bottom - m_rcMonitor.top) / 2;
+    }
+
+    m_pt.x = clamp(pt.x, m_rcMonitor.left, m_rcMonitor.right - 1);
+    m_pt.y = clamp(pt.y, m_rcMonitor.top, m_rcMonitor.bottom - 1);
+    PaintZoomRect();
+}
+
+void Zoomin::SetZoomFactor(INT factor)
+{
+    factor = clamp(factor, c_min_zoom, c_max_zoom);
+
+    if (factor == m_factor)
+        return;
+
+    m_factor = factor;
+
+    CalcZoomArea();
+
+    SCROLLINFO si = { sizeof(si) };
+    si.fMask = SIF_ALL|SIF_DISABLENOSCROLL;
+    si.nMin = c_min_zoom;
+    si.nMax = c_max_zoom;
+    si.nPage = 1;
+    si.nPos = m_factor;
+    SetScrollInfo(m_hwnd, SB_VERT, &si, true);
+
+    WCHAR title[64];
+    wsprintfW(title, TEXT("Zoomin  ( %ux )"), m_factor);
+    SetWindowText(m_hwnd, title);
+
+    InvalidateRect(m_hwnd, nullptr, false);
+}
+
+void Zoomin::CalcZoomArea()
+{
+    RECT rc;
+    GetClientRect(m_hwnd, &rc);
+    m_area.cx = ((rc.right - rc.left) + m_factor - 1) / m_factor;
+    m_area.cy = ((rc.bottom - rc.top) + m_factor - 1) / m_factor;
 }
 
 void Zoomin::GetZoomArea(RECT& rc)
@@ -461,6 +606,7 @@ static HWND CreateMainWindow()
     WNDCLASS wc = {};
     wc.lpszClassName = c_wndclass_name;
     wc.lpszMenuName = MAKEINTRESOURCE(IDR_MENU);
+    wc.style = CS_HREDRAW|CS_VREDRAW;
     wc.hIcon = LoadIcon(g_hinst, MAKEINTRESOURCE(IDI_MAIN));
     wc.hCursor = LoadCursor(0, IDC_ARROW);
     wc.hbrBackground = HBRUSH(COLOR_WINDOW + 1);
@@ -468,7 +614,7 @@ static HWND CreateMainWindow()
     wc.lpfnWndProc = Zoomin::WndProc;
     RegisterClass(&wc);
 
-    const DWORD c_style = WS_OVERLAPPEDWINDOW;
+    const DWORD c_style = WS_OVERLAPPEDWINDOW|WS_VSCROLL;
     return CreateWindow(c_wndclass_name, TEXT("Zoomin"), c_style,
                         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
                         NULL, NULL, g_hinst, NULL);
@@ -485,6 +631,7 @@ int PASCAL WinMain(
 {
     MSG msg = { 0 };
     g_hinst = hinstCurrent;
+    g_haccel = LoadAccelerators(g_hinst, MAKEINTRESOURCE(IDR_ACCEL));
 
     //CoInitialize(0);
     InitCommonControls();
@@ -495,12 +642,13 @@ int PASCAL WinMain(
     {
         ShowWindow(hwnd, nCmdShow);
 
-        while (true)
+        while (GetMessage(&msg, nullptr, 0, 0))
         {
-            if (!GetMessage(&msg, nullptr, 0, 0))
-                    break;
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
+            if (!g_haccel || !TranslateAccelerator(hwnd, g_haccel, &msg))
+            {
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
         }
 
         MSG tmp;
