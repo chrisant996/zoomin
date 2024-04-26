@@ -582,8 +582,13 @@ void Zoomin::SetZoomPoint(LPARAM lParam)
     POINT pt;
     pt.x = SHORT(LOWORD(lParam));
     pt.y = SHORT(HIWORD(lParam));
-// TODO: handle DPI awareness.
-    ClientToScreen(m_hwnd, &pt);
+
+    {
+        // Get raw unscaled screen coordinates.
+        ThreadDpiAwarenessContext ctx(DPI_AWARENESS_CONTEXT_UNAWARE);
+        ClientToScreen(m_hwnd, &pt);
+    }
+
     SetZoomPoint(pt);
 }
 
