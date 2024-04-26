@@ -5,11 +5,13 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <commctrl.h>
+#include <shellapi.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <algorithm>
 
 #include "dpi.h"
+#include "version.h"
 #include "res.h"
 
 static const WCHAR c_reg_root[] = TEXT("Software\\chrisant996\\Zoomin");
@@ -253,6 +255,7 @@ private:
     void CopyZoomContent();
 
     static INT_PTR CALLBACK OptionsDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+    static INT_PTR CALLBACK AboutDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 private:
     HWND m_hwnd = NULL;
@@ -520,7 +523,7 @@ bool Zoomin::OnCommand(WORD id, WORD code, HWND hwndCtrl)
             PaintZoomRect();
         break;
     case IDM_HELP_ABOUT:
-// TODO: About dialog with link to repo.
+        DialogBox(g_hinst, MAKEINTRESOURCE(IDD_ABOUT), m_hwnd, AboutDlgProc);
         break;
     case IDM_REFRESH_ONOFF:
         SetRefresh(!m_refresh);
@@ -808,6 +811,20 @@ void Zoomin::CopyZoomContent()
         ReleaseDC(m_hwnd, hdcFrom);
 }
 
+static void CenterDialog(HWND hwnd)
+{
+    RECT rc;
+    RECT rcParent;
+
+    GetWindowRect(hwnd, &rc);
+    GetWindowRect(GetParent(hwnd), &rcParent);
+
+    const LONG xx = (rcParent.right + rcParent.left) / 2 - (rc.right - rc.left) / 2;
+    const LONG yy = (rcParent.bottom + rcParent.top) / 2 - (rc.bottom - rc.top) / 2;
+
+    MoveWindow(hwnd, xx, yy, rc.right - rc.left, rc.bottom - rc.top, false);
+}
+
 INT_PTR CALLBACK Zoomin::OptionsDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg)
@@ -822,6 +839,7 @@ INT_PTR CALLBACK Zoomin::OptionsDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
         SetDlgItemInt(hwnd, IDC_REFRESH_INTERVAL, s_zoomin.m_interval, false);
         SetDlgItemInt(hwnd, IDC_MINOR_RESOLUTION, s_zoomin.m_gridline_spacing[0], false);
         SetDlgItemInt(hwnd, IDC_MAJOR_RESOLUTION, s_zoomin.m_gridline_spacing[1], false);
+        CenterDialog(hwnd);
         return true;
 
     case WM_COMMAND:
@@ -839,6 +857,40 @@ INT_PTR CALLBACK Zoomin::OptionsDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
 
         case IDCANCEL:
             EndDialog(hwnd, false);
+            break;
+        }
+        break;
+    }
+
+    return false;
+}
+
+INT_PTR CALLBACK Zoomin::AboutDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg)
+    {
+    case WM_INITDIALOG:
+        {
+            char version[64];
+            wsprintfA(version, "Zoomin v%u.%u", VERSION_MAJOR, VERSION_MINOR);
+            SetDlgItemTextA(hwnd, IDC_VERSION, version);
+            SetDlgItemTextA(hwnd, IDC_COPYRIGHT, COPYRIGHT_STR);
+            SetFocus(GetDlgItem(hwnd, IDOK));
+            CenterDialog(hwnd);
+        }
+        return false;
+
+    case WM_COMMAND:
+        switch (LOWORD(wParam))
+        {
+        case IDOK:
+        case IDCANCEL:
+            EndDialog(hwnd, true);
+            break;
+
+        case IDC_REPO:
+            AllowSetForegroundWindow(ASFW_ANY);
+            ShellExecuteA(0, nullptr, "https://github.com/chrisant996/zoomin", 0, 0, SW_NORMAL);
             break;
         }
         break;

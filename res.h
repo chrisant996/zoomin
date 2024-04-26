@@ -14,6 +14,7 @@
 
 // Dialogs.
 #define IDD_OPTIONS             1200
+#define IDD_ABOUT               1201
 
 // Menu Commands.
 #define IDM_EDIT_COPY           2000
@@ -32,4 +33,7 @@
 #define IDC_MINOR_RESOLUTION    3003
 #define IDC_ENABLE_MAJORLINES   3004
 #define IDC_MAJOR_RESOLUTION    3005
+#define IDC_VERSION             3006
+#define IDC_COPYRIGHT           3007
+#define IDC_REPO                3008
 

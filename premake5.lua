@@ -236,26 +236,20 @@ local function parse_version_file()
     if not ver_file then
         error("Failed to open version.h file")
     end
-    local vmaj, vmon, vday, vpatch
+    local vmaj, vmin
     for line in ver_file:lines() do
         if not vmaj then
             vmaj = line:match("VERSION_MAJOR%s+([^%s]+)")
         end
-        if not vmon then
-            vmon = line:match("VERSION_MONTH%s+([^%s]+)")
-        end
-        if not vday then
-            vday = line:match("VERSION_DAY%s+([^%s]+)")
-        end
-        if not vpatch then
-            vpatch = line:match("VERSION_PATCH%s+([^%s]+)")
+        if not vmin then
+            vmin = line:match("VERSION_MINOR%s+([^%s]+)")
         end
     end
     ver_file:close()
-    if not (vmaj and vmon and vday and vpatch) then
+    if not (vmaj and vmin) then
         error("Failed to get version info")
     end
-    return vmaj .. "." .. vmon .. "." .. vday .. "." .. vpatch
+    return vmaj .. "." .. vmin
 end
 
 --------------------------------------------------------------------------------
@@ -402,7 +396,7 @@ newaction {
         end
 
         for line in src:lines("*L") do
-            line = line:gsub("%%VERSION%%", version)
+            line = line:gsub("%%VERSION%%", version .. ".0.0")
             dst:write(line)
         end
 
