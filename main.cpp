@@ -250,6 +250,7 @@ private:
     void GetZoomArea(RECT& rc);
     void InvertReticle();
     void PaintZoomRect(HDC hdc=NULL);
+    void CopyZoomContent();
 
     static INT_PTR CALLBACK OptionsDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -505,7 +506,7 @@ bool Zoomin::OnCommand(WORD id, WORD code, HWND hwndCtrl)
     switch (id)
     {
     case IDM_EDIT_COPY:
-// TODO: copy zoomed content to clipboard.
+        CopyZoomContent();
         break;
     case IDM_EDIT_REFRESH:
         PaintZoomRect();
@@ -766,6 +767,45 @@ void Zoomin::PaintZoomRect(HDC hdc)
     ReleaseDC(NULL, hdcFrom);
     if (!hdc)
         ReleaseDC(m_hwnd, hdcTo);
+}
+
+void Zoomin::CopyZoomContent()
+{
+    RECT rc;
+    GetClientRect(m_hwnd, &rc);
+
+    HDC hdcFrom = GetDC(m_hwnd);
+    HDC hdcTo = hdcFrom ? CreateCompatibleDC(hdcFrom) : NULL;
+    HBITMAP hbmp = hdcFrom ? CreateCompatibleBitmap(hdcFrom, rc.right - rc.left, rc.bottom - rc.top) : NULL;
+    if (hdcFrom && hdcTo && hbmp && OpenClipboard(m_hwnd))
+    {
+        EmptyClipboard();
+
+        const DWORD width = MulDiv(rc.right - rc.left, 254, GetDeviceCaps(hdcFrom, LOGPIXELSX));
+        const DWORD height = MulDiv(rc.bottom - rc.top, 254, GetDeviceCaps(hdcFrom, LOGPIXELSY));
+        SetBitmapDimensionEx(hbmp, width, height, nullptr);
+
+        HBITMAP hbmpOld = SelectBitmap(hdcTo, hbmp);
+        BitBlt(hdcTo, 0, 0, rc.right - rc.left, rc.bottom - rc.top,
+               hdcFrom, rc.left, rc.top, SRCCOPY);
+        SelectBitmap(hdcTo, hbmpOld);
+
+        SetClipboardData(CF_BITMAP, hbmp);
+        hbmp = NULL;
+
+        CloseClipboard();
+    }
+    else
+    {
+        MessageBeep(0xffffffff);
+    }
+
+    if (hbmp)
+        DeleteObject(hbmp);
+    if (hdcTo)
+        DeleteDC(hdcTo);
+    if (hdcFrom)
+        ReleaseDC(m_hwnd, hdcFrom);
 }
 
 INT_PTR CALLBACK Zoomin::OptionsDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
