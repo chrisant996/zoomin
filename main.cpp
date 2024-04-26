@@ -14,9 +14,25 @@
 
 static const WCHAR c_reg_root[] = TEXT("Software\\chrisant996\\Zoomin");
 static const WCHAR c_wndclass_name[] = TEXT("ZoominMainWindow");
+static const WCHAR* const c_gridline_spacing_name[] =
+{
+    TEXT("SpacingMinorGridlines"),
+    TEXT("SpacingMajorGridlines"),
+};
+static const WCHAR* const c_show_gridlines_name[] =
+{
+    TEXT("ShowMinorGridlines"),
+    TEXT("ShowMajorGridlines"),
+};
+static const BYTE c_default_gridlines_spacing[] =
+{
+    1,
+    8,
+};
 
 constexpr INT c_min_zoom = 1;
 constexpr INT c_max_zoom = 32;
+constexpr UINT c_refresh_timer_id = 1;
 
 static HINSTANCE g_hinst = 0;
 static HACCEL g_haccel = 0;
@@ -184,11 +200,13 @@ private:
     void OnCreate(HWND hwnd);
     void OnDestroy();
     void OnPaint();
+    void OnTimer(WPARAM wParam);
     void OnButtonDown(LPARAM lParam);
     void OnMouseMove(LPARAM lParam);
     void OnCancelMode();
     void OnVScroll(WPARAM wParam);
     void OnKeyDown(WPARAM wParam, LPARAM lParam);
+    void OnInitMenuPopup(HMENU hmenu);
     bool OnCommand(WORD id, WORD code, HWND hwndCtrl);
     void OnSize();
     void OnDpiChanged(const DpiScaler& dpi);
@@ -198,19 +216,27 @@ private:
     void SetZoomPoint(LPARAM lParam);
     void SetZoomPoint(POINT pt);
     void SetZoomFactor(INT factor);
+    void SetRefresh(bool refresh);
+    void SetInterval(UINT interval);
     void CalcZoomArea();
     void GetZoomArea(RECT& rc);
     void InvertReticle();
     void PaintZoomRect(HDC hdc=NULL);
 
+    static INT_PTR CALLBACK OptionsDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
 private:
     HWND m_hwnd = NULL;
     DpiScaler m_dpi;
-    POINT m_pt;
+    bool m_show_gridlines[2] = {};
+    INT m_gridline_spacing[2] = {};
+    POINT m_pt = {};
     SIZE m_area;
     INT m_factor = 0;
     RECT m_rcMonitor;
     bool m_captured = false;
+    bool m_refresh = false;
+    INT m_interval = 0;
     SizeTracker m_sizeTracker;
 };
 
@@ -224,6 +250,9 @@ LRESULT CALLBACK Zoomin::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         return true;
     case WM_PAINT:
         s_zoomin.OnPaint();
+        break;
+    case WM_TIMER:
+        s_zoomin.OnTimer(wParam);
         break;
 
     case WM_LBUTTONDOWN:
@@ -244,6 +273,9 @@ LRESULT CALLBACK Zoomin::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         s_zoomin.OnKeyDown(wParam, lParam);
         break;
 
+    case WM_INITMENUPOPUP:
+        s_zoomin.OnInitMenuPopup(HMENU(wParam));
+        break;
     case WM_COMMAND:
         {
             const WORD id = GET_WM_COMMAND_ID(wParam, lParam);
@@ -294,6 +326,14 @@ void Zoomin::OnDestroy()
     WriteRegLong(TEXT("PointX"), m_pt.x);
     WriteRegLong(TEXT("PointY"), m_pt.y);
     WriteRegLong(TEXT("ZoomFactor"), m_factor);
+    WriteRegLong(TEXT("RefreshEnabled"), m_refresh);
+    WriteRegLong(TEXT("RefreshInterval"), m_interval);
+
+    for (size_t ii = _countof(m_show_gridlines); ii--;)
+    {
+        WriteRegLong(c_show_gridlines_name[ii], m_show_gridlines[ii]);
+        WriteRegLong(c_gridline_spacing_name[ii], m_gridline_spacing[ii]);
+    }
 }
 
 void Zoomin::OnPaint()
@@ -306,6 +346,16 @@ void Zoomin::OnPaint()
 
     RestoreDC(ps.hdc, -1);
     EndPaint(m_hwnd, &ps);
+}
+
+void Zoomin::OnTimer(WPARAM wParam)
+{
+    if (wParam == c_refresh_timer_id)
+    {
+        const HCURSOR hcur = SetCursor(LoadCursor(NULL, IDC_WAIT));
+        PaintZoomRect();
+        SetCursor(hcur);
+    }
 }
 
 void Zoomin::OnButtonDown(LPARAM lParam)
@@ -410,6 +460,11 @@ void Zoomin::OnKeyDown(WPARAM wParam, LPARAM lParam)
     }
 }
 
+void Zoomin::OnInitMenuPopup(HMENU hmenu)
+{
+    CheckMenuItem(hmenu, IDM_OPTIONS_GRIDLINES, m_show_gridlines[0] ? MF_CHECKED : MF_UNCHECKED);
+}
+
 bool Zoomin::OnCommand(WORD id, WORD code, HWND hwndCtrl)
 {
     switch (id)
@@ -421,16 +476,18 @@ bool Zoomin::OnCommand(WORD id, WORD code, HWND hwndCtrl)
         PaintZoomRect();
         break;
     case IDM_OPTIONS_GRIDLINES:
-// TODO: toggle gridlines.
+        m_show_gridlines[0] = !m_show_gridlines[0];
+        PaintZoomRect();
         break;
     case IDM_OPTIONS_OPTIONS:
-// TODO: Options dialog.
+        if (DialogBox(g_hinst, MAKEINTRESOURCE(IDD_OPTIONS), m_hwnd, OptionsDlgProc))
+            PaintZoomRect();
         break;
     case IDM_HELP_ABOUT:
 // TODO: About dialog with link to repo.
         break;
     case IDM_REFRESH_ONOFF:
-// TODO: toggle auto-refresh.
+        SetRefresh(!m_refresh);
         break;
 
     case IDM_ZOOM_OUT:
@@ -468,6 +525,15 @@ void Zoomin::Init()
     SetZoomPoint(pt);
 
     SetZoomFactor(ReadRegLong(TEXT("ZoomFactor"), 4));
+
+    SetInterval(ReadRegLong(TEXT("RefreshInterval"), 20));
+    SetRefresh(!!ReadRegLong(TEXT("RefreshEnabled"), false));
+
+    for (size_t ii = _countof(m_show_gridlines); ii--;)
+    {
+        m_show_gridlines[ii] = !!ReadRegLong(c_show_gridlines_name[ii], false);
+        m_gridline_spacing[ii] = ReadRegLong(c_gridline_spacing_name[ii], c_default_gridlines_spacing[ii]);
+    }
 }
 
 void Zoomin::SetZoomPoint(LPARAM lParam)
@@ -532,10 +598,37 @@ void Zoomin::SetZoomFactor(INT factor)
     SetScrollInfo(m_hwnd, SB_VERT, &si, true);
 
     WCHAR title[64];
-    wsprintfW(title, TEXT("Zoomin  ( %ux )"), m_factor);
+    wsprintfW(title, TEXT("Zoomin  \u00b7  %ux"), m_factor);
     SetWindowText(m_hwnd, title);
 
     InvalidateRect(m_hwnd, nullptr, false);
+}
+
+void Zoomin::SetRefresh(bool refresh)
+{
+    if (refresh == m_refresh)
+        return;
+
+    m_refresh = refresh;
+
+    if (refresh)
+        SetInterval(m_interval);
+    else
+        KillTimer(m_hwnd, c_refresh_timer_id);
+
+    MENUITEMINFO mii = { sizeof(mii) };
+    mii.fMask = MIIM_STRING;
+    mii.dwTypeData = refresh ? TEXT("Turn &Refresh Off!") : TEXT("Turn &Refresh On!");
+    SetMenuItemInfo(GetMenu(m_hwnd), IDM_REFRESH_ONOFF, false, &mii);
+
+    DrawMenuBar(m_hwnd);
+}
+
+void Zoomin::SetInterval(UINT interval)
+{
+    m_interval = interval;
+    if (m_refresh)
+        SetTimer(m_hwnd, c_refresh_timer_id, std::max<INT>(m_interval, 1) * 100, nullptr);
 }
 
 void Zoomin::CalcZoomArea()
@@ -588,17 +681,82 @@ void Zoomin::PaintZoomRect(HDC hdc)
     if (rc.right <= rc.left || rc.bottom <= rc.top)
         return;
 
+    RECT rcClient;
+    GetClientRect(m_hwnd, &rcClient);
+
     const HDC hdcTo = hdc ? hdc : GetDC(m_hwnd);
     const HDC hdcFrom = GetDC(NULL);
     const int bltmode = SetStretchBltMode(hdcTo, COLORONCOLOR);
 
+// TODO: palette management?
     StretchBlt(hdcTo, 0, 0, m_factor * m_area.cx, m_factor * m_area.cy,
                hdcFrom, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, SRCCOPY);
+
+    static_assert(_countof(m_show_gridlines) == _countof(m_gridline_spacing), "array size mismatch");
+    for (size_t ii = 0; ii < _countof(m_show_gridlines); ++ii)
+    {
+        if (m_show_gridlines[ii] && m_factor > ii + 1)
+        {
+            const HPEN hpenLine = CreatePen(PS_SOLID, ii ? 2 : 0, RGB(0, 0, 0));
+            const HPEN hpenOld = SelectPen(hdcTo, hpenLine);
+            for (LONG xx = rcClient.left; xx < rcClient.right; xx += m_factor * m_gridline_spacing[ii])
+            {
+                MoveToEx(hdcTo, xx, rcClient.top, nullptr);
+                LineTo(hdcTo, xx, rcClient.bottom);
+            }
+            for (LONG yy = rcClient.top; yy < rcClient.bottom; yy += m_factor * m_gridline_spacing[ii])
+            {
+                MoveToEx(hdcTo, rcClient.left, yy, nullptr);
+                LineTo(hdcTo, rcClient.right, yy);
+            }
+            SelectPen(hdcTo, hpenOld);
+            DeleteObject(hpenLine);
+        }
+    }
 
     SetStretchBltMode(hdcTo, bltmode);
     ReleaseDC(NULL, hdcFrom);
     if (!hdc)
         ReleaseDC(m_hwnd, hdcTo);
+}
+
+INT_PTR CALLBACK Zoomin::OptionsDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg)
+    {
+    case WM_INITDIALOG:
+        CheckDlgButton(hwnd, IDC_ENABLE_REFRESH, s_zoomin.m_refresh ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(hwnd, IDC_ENABLE_MINORLINES, s_zoomin.m_show_gridlines[0] ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(hwnd, IDC_ENABLE_MAJORLINES, s_zoomin.m_show_gridlines[1] ? BST_CHECKED : BST_UNCHECKED);
+        SendDlgItemMessage(hwnd, IDC_REFRESH_INTERVAL, EM_LIMITTEXT, 3, 0);
+        SendDlgItemMessage(hwnd, IDC_MINOR_RESOLUTION, EM_LIMITTEXT, 4, 0);
+        SendDlgItemMessage(hwnd, IDC_MAJOR_RESOLUTION, EM_LIMITTEXT, 4, 0);
+        SetDlgItemInt(hwnd, IDC_REFRESH_INTERVAL, s_zoomin.m_interval, false);
+        SetDlgItemInt(hwnd, IDC_MINOR_RESOLUTION, s_zoomin.m_gridline_spacing[0], false);
+        SetDlgItemInt(hwnd, IDC_MAJOR_RESOLUTION, s_zoomin.m_gridline_spacing[1], false);
+        return true;
+
+    case WM_COMMAND:
+        switch (LOWORD(wParam))
+        {
+        case IDOK:
+            s_zoomin.SetInterval(GetDlgItemInt(hwnd, IDC_REFRESH_INTERVAL, nullptr, false));
+            s_zoomin.m_gridline_spacing[0] = GetDlgItemInt(hwnd, IDC_MINOR_RESOLUTION, nullptr, false);
+            s_zoomin.m_gridline_spacing[1] = GetDlgItemInt(hwnd, IDC_MAJOR_RESOLUTION, nullptr, false);
+            s_zoomin.SetRefresh(!!IsDlgButtonChecked(hwnd, IDC_ENABLE_REFRESH));
+            s_zoomin.m_show_gridlines[0] = !!IsDlgButtonChecked(hwnd, IDC_ENABLE_MINORLINES);
+            s_zoomin.m_show_gridlines[1] = !!IsDlgButtonChecked(hwnd, IDC_ENABLE_MAJORLINES);
+            EndDialog(hwnd, true);
+            break;
+
+        case IDCANCEL:
+            EndDialog(hwnd, false);
+            break;
+        }
+        break;
+    }
+
+    return false;
 }
 
 static HWND CreateMainWindow()
@@ -623,21 +781,13 @@ static HWND CreateMainWindow()
 //------------------------------------------------------------------------------
 // WinMain.
 
-int PASCAL WinMain(
-    HINSTANCE hinstCurrent,
-    HINSTANCE /*hinstPrevious*/,
-    LPSTR /*lpszCmdLine*/,
-    int nCmdShow)
+int PASCAL WinMain(HINSTANCE hinstCurrent, HINSTANCE /*hinstPrevious*/, LPSTR /*lpszCmdLine*/, int nCmdShow)
 {
-    MSG msg = { 0 };
+    MSG msg = {};
     g_hinst = hinstCurrent;
     g_haccel = LoadAccelerators(g_hinst, MAKEINTRESOURCE(IDR_ACCEL));
 
-    //CoInitialize(0);
-    InitCommonControls();
-
     HWND hwnd = CreateMainWindow();
-
     if (hwnd)
     {
         ShowWindow(hwnd, nCmdShow);
@@ -650,9 +800,6 @@ int PASCAL WinMain(
                 DispatchMessage(&msg);
             }
         }
-
-        MSG tmp;
-        do {} while(PeekMessage(&tmp, 0, WM_QUIT, WM_QUIT, PM_REMOVE));
     }
 
     return int(msg.wParam);
