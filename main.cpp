@@ -824,12 +824,12 @@ void Zoomin::PaintZoomRect(HDC hdc)
         {
             const HPEN hpenLine = CreatePen(PS_SOLID, thick, RGB(0, 0, 0));
             const HPEN hpenOld = SelectPen(hdcTo, hpenLine);
-            for (LONG xx = rcClient.left; xx < rcClient.right; xx += factor * m_gridline_spacing[ii])
+            for (LONG xx = rcClient.left; xx <= rcClient.right; xx += factor * m_gridline_spacing[ii])
             {
                 MoveToEx(hdcTo, xx, rcClient.top, nullptr);
                 LineTo(hdcTo, xx, rcClient.bottom);
             }
-            for (LONG yy = rcClient.top; yy < rcClient.bottom; yy += factor * m_gridline_spacing[ii])
+            for (LONG yy = rcClient.top; yy <= rcClient.bottom; yy += factor * m_gridline_spacing[ii])
             {
                 MoveToEx(hdcTo, rcClient.left, yy, nullptr);
                 LineTo(hdcTo, rcClient.right, yy);
