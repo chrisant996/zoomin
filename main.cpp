@@ -243,6 +243,7 @@ private:
 
     // Internal helpers.
     void Init();
+    void UpdateTitle();
     void SetZoomPoint(LPARAM lParam);
     void SetZoomPoint(POINT pt);
     void SetZoomFactor(INT factor);
@@ -558,6 +559,7 @@ void Zoomin::OnDpiChanged(const DpiScaler& dpi)
 {
     m_dpi.OnDpiChanged(dpi);
     m_sizeTracker.OnDpiChanged(dpi);
+    CalcZoomArea();
     InvalidateRect(m_hwnd, nullptr, false);
 }
 
@@ -582,17 +584,20 @@ void Zoomin::Init()
     m_hpal = CreatePhysicalPalette();
 }
 
+void Zoomin::UpdateTitle()
+{
+    WCHAR title[64];
+    wsprintfW(title, TEXT("Zoomin  \u00b7  %ux"), m_factor);
+    SetWindowText(m_hwnd, title);
+}
+
 void Zoomin::SetZoomPoint(LPARAM lParam)
 {
     POINT pt;
     pt.x = SHORT(LOWORD(lParam));
     pt.y = SHORT(HIWORD(lParam));
 
-    {
-        // Get raw unscaled screen coordinates.
-        ThreadDpiAwarenessContext ctx(DPI_AWARENESS_CONTEXT_UNAWARE);
-        ClientToScreen(m_hwnd, &pt);
-    }
+    ClientToScreen(m_hwnd, &pt);
 
     SetZoomPoint(pt);
 }
@@ -648,9 +653,7 @@ void Zoomin::SetZoomFactor(INT factor)
     si.nPos = m_factor;
     SetScrollInfo(m_hwnd, SB_VERT, &si, true);
 
-    WCHAR title[64];
-    wsprintfW(title, TEXT("Zoomin  \u00b7  %ux"), m_factor);
-    SetWindowText(m_hwnd, title);
+    UpdateTitle();
 
     InvalidateRect(m_hwnd, nullptr, false);
 }
@@ -686,8 +689,10 @@ void Zoomin::CalcZoomArea()
 {
     RECT rc;
     GetClientRect(m_hwnd, &rc);
-    m_area.cx = ((rc.right - rc.left) + m_factor - 1) / m_factor;
-    m_area.cy = ((rc.bottom - rc.top) + m_factor - 1) / m_factor;
+    const INT factor = m_dpi.Scale(m_factor);
+    m_area.cx = ((rc.right - rc.left) + factor - 1) / factor;
+    m_area.cy = ((rc.bottom - rc.top) + factor - 1) / factor;
+    UpdateTitle();
 }
 
 void Zoomin::GetZoomArea(RECT& rc)
@@ -746,22 +751,24 @@ void Zoomin::PaintZoomRect(HDC hdc)
         RealizePalette(hdcTo);
     }
 
-    StretchBlt(hdcTo, 0, 0, m_factor * m_area.cx, m_factor * m_area.cy,
+    const INT factor = m_dpi.Scale(m_factor);
+
+    StretchBlt(hdcTo, 0, 0, factor * m_area.cx, factor * m_area.cy,
                hdcFrom, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, SRCCOPY);
 
     static_assert(_countof(m_show_gridlines) == _countof(m_gridline_spacing), "array size mismatch");
     for (size_t ii = 0; ii < _countof(m_show_gridlines); ++ii)
     {
-        if (m_show_gridlines[ii] && m_factor > ii + 1)
+        if (m_show_gridlines[ii] && factor > ii + 1)
         {
             const HPEN hpenLine = CreatePen(PS_SOLID, ii ? 2 : 0, RGB(0, 0, 0));
             const HPEN hpenOld = SelectPen(hdcTo, hpenLine);
-            for (LONG xx = rcClient.left; xx < rcClient.right; xx += m_factor * m_gridline_spacing[ii])
+            for (LONG xx = rcClient.left; xx < rcClient.right; xx += factor * m_gridline_spacing[ii])
             {
                 MoveToEx(hdcTo, xx, rcClient.top, nullptr);
                 LineTo(hdcTo, xx, rcClient.bottom);
             }
-            for (LONG yy = rcClient.top; yy < rcClient.bottom; yy += m_factor * m_gridline_spacing[ii])
+            for (LONG yy = rcClient.top; yy < rcClient.bottom; yy += factor * m_gridline_spacing[ii])
             {
                 MoveToEx(hdcTo, rcClient.left, yy, nullptr);
                 LineTo(hdcTo, rcClient.right, yy);
