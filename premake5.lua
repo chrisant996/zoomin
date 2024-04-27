@@ -287,7 +287,7 @@ newaction {
                 exec(premake .. " " .. toolchain)
                 os.chdir(".build/" .. toolchain)
 
-                x86_ok = exec(have_msbuild .. " /m /v:q /p:configuration=release /p:platform=x32 zoomin.sln /t:" .. target)
+                x86_ok = exec(have_msbuild .. " /m /v:q /p:configuration=release /p:platform=win32 zoomin.sln /t:" .. target)
 
                 os.chdir("../..")
             else
@@ -333,7 +333,7 @@ newaction {
         end
 
         if sign then
-            sign_files({"x86\\zoomin.exe"})
+            sign_files({"x32\\zoomin.exe"})
         end
 
         -- Parse version.
@@ -345,7 +345,7 @@ newaction {
         mkdir(target_dir)
 
         -- Package the release and the pdbs separately.
-        os.chdir(src .. "/x86")
+        os.chdir(src .. "/x32")
         if have_7z then
             --exec(have_7z .. " a -r  " .. target_dir .. "zoomin-v" .. version .. "-symbols.zip  *.pdb")
             exec(have_7z .. " a -r  " .. target_dir .. "zoomin-v" .. version .. ".zip  *.exe")
