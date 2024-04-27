@@ -229,10 +229,13 @@ void SizeTracker::OnDestroy()
     HMONITOR hmon = MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST);
     GetMonitorInfo(hmon, &info);
 
+    const LONG cxWork = (info.rcWork.right - info.rcWork.left);
+    const LONG cyWork = (info.rcWork.bottom - info.rcWork.top);
+
     WriteRegLong(TEXT("MonitorX"), (info.rcMonitor.left + info.rcMonitor.right) / 2);
     WriteRegLong(TEXT("MonitorY"), (info.rcMonitor.top + info.rcMonitor.bottom) / 2);
-    WriteRegLong(TEXT("WindowLeftRatio"), (m_rcRestore.left - info.rcWork.left) * 50000 / (info.rcWork.right - info.rcWork.left));
-    WriteRegLong(TEXT("WindowTopRatio"), (m_rcRestore.top - info.rcWork.top) * 50000 / (info.rcWork.bottom - info.rcWork.top));
+    WriteRegLong(TEXT("WindowLeftRatio"), (cxWork > 0) ? (m_rcRestore.left - info.rcWork.left) * 50000 / cxWork : 0);
+    WriteRegLong(TEXT("WindowTopRatio"), (cyWork > 0) ? (m_rcRestore.top - info.rcWork.top) * 50000 / cyWork : 0);
     WriteRegLong(TEXT("WindowWidth"), m_dpi.ScaleTo(m_rcRestore.right - m_rcRestore.left, 96));
     WriteRegLong(TEXT("WindowHeight"), m_dpi.ScaleTo(m_rcRestore.bottom - m_rcRestore.top, 96));
     WriteRegLong(TEXT("Maximized"), m_maximized);
@@ -301,7 +304,7 @@ private:
     void SetRefresh(bool refresh);
     void SetInterval(UINT interval);
     void CalcZoomArea();
-    void GetZoomArea(RECT& rc);
+    bool GetZoomArea(RECT& rc);
     void InvertReticle();
     void PaintZoomRect(HDC hdc=NULL);
     void CopyZoomContent();
@@ -742,13 +745,13 @@ void Zoomin::CalcZoomArea()
 {
     RECT rc;
     GetClientRect(m_hwnd, &rc);
-    const INT factor = m_dpi.Scale(m_factor);
+    const INT factor = std::max<INT>(0, m_dpi.Scale(m_factor));
     m_area.cx = ((rc.right - rc.left) + factor - 1) / factor;
     m_area.cy = ((rc.bottom - rc.top) + factor - 1) / factor;
     UpdateTitle();
 }
 
-void Zoomin::GetZoomArea(RECT& rc)
+bool Zoomin::GetZoomArea(RECT& rc)
 {
     const LONG xx = clamp(m_pt.x, m_rcMonitor.left + m_area.cx / 2, m_rcMonitor.right - (m_area.cx - m_area.cx / 2));
     const LONG yy = clamp(m_pt.y, m_rcMonitor.top + m_area.cy / 2, m_rcMonitor.bottom - (m_area.cy - m_area.cy / 2));
@@ -757,6 +760,8 @@ void Zoomin::GetZoomArea(RECT& rc)
     rc.top = yy - m_area.cy / 2;
     rc.right = rc.left + m_area.cx;
     rc.bottom = rc.top + m_area.cy;
+
+    return (rc.right > rc.left && rc.bottom > rc.top);
 }
 
 void Zoomin::InvertReticle()
@@ -765,7 +770,8 @@ void Zoomin::InvertReticle()
         return;
 
     RECT rc;
-    GetZoomArea(rc);
+    if (!GetZoomArea(rc))
+        return;
 
     const LONG thick = 1;
     InflateRect(&rc, thick, thick);
@@ -785,10 +791,11 @@ void Zoomin::InvertReticle()
 void Zoomin::PaintZoomRect(HDC hdc)
 {
     RECT rc;
-    GetZoomArea(rc);
-
-    if (rc.right <= rc.left || rc.bottom <= rc.top)
+    if (!GetZoomArea(rc))
         return;
+
+    assert(rc.right > rc.left);
+    assert(rc.bottom > rc.top);
 
     RECT rcClient;
     GetClientRect(m_hwnd, &rcClient);
@@ -804,7 +811,7 @@ void Zoomin::PaintZoomRect(HDC hdc)
         RealizePalette(hdcTo);
     }
 
-    const INT factor = m_dpi.Scale(m_factor);
+    const INT factor = std::max<INT>(1, m_dpi.Scale(m_factor));
 
     StretchBlt(hdcTo, 0, 0, factor * m_area.cx, factor * m_area.cy,
                hdcFrom, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, SRCCOPY);
