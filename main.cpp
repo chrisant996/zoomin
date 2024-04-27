@@ -812,9 +812,10 @@ void Zoomin::PaintZoomRect(HDC hdc)
     static_assert(_countof(m_show_gridlines) == _countof(m_gridline_spacing), "array size mismatch");
     for (size_t ii = 0; ii < _countof(m_show_gridlines); ++ii)
     {
-        if (m_show_gridlines[ii] && factor > ii + 1)
+        const int thick = !ii ? 0 : (m_show_gridlines[0] ? 2 : 0);
+        if (m_show_gridlines[ii] && factor > (thick ? 2 : 1))
         {
-            const HPEN hpenLine = CreatePen(PS_SOLID, ii ? 2 : 0, RGB(0, 0, 0));
+            const HPEN hpenLine = CreatePen(PS_SOLID, thick, RGB(0, 0, 0));
             const HPEN hpenOld = SelectPen(hdcTo, hpenLine);
             for (LONG xx = rcClient.left; xx < rcClient.right; xx += factor * m_gridline_spacing[ii])
             {
