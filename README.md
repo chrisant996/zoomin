@@ -21,3 +21,13 @@ It's modeled after the old sample ZoomIn tool from an old Microsoft SDK.
 I've used the old ZoomIn tool for decades.  But none of the spinoff versions were updated to support [Dynamic DPI](https://learn.microsoft.com/en-us/windows/win32/hidpi/high-dpi-desktop-application-development-on-windows) across multiple monitors, and that made them unable to zoom in on some regions of some monitors.  I needed to zoomin in anywhere.
 
 So I wrote my own version from scratch, and implemented full DDPI support so it works seamlessly across multiple monitors with different DPI scaling factors.  It's released under the MIT license.
+
+## Building Zoomin
+
+Zoomin uses [Premake](http://premake.github.io) to generate Visual Studio solutions. Note that Premake >= 5.0-alpha12 is required.
+
+1. Cd to your clone of zoomin.
+2. Run <code>premake5.exe <em>toolchain</em></code> (where <em>toolchain</em> is one of Premake's actions - see `premake5.exe --help`).
+3. Build scripts will be generated in <code>.build\\<em>toolchain</em></code>. For example `.build\vs2019\zoomin.sln`.
+4. Call your toolchain of choice (Visual Studio, msbuild.exe, etc).
+
