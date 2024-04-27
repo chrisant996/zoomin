@@ -34,6 +34,8 @@ static const BYTE c_default_gridlines_spacing[] =
 
 constexpr INT c_min_zoom = 1;
 constexpr INT c_max_zoom = 32;
+constexpr LONG c_def_width = 480;
+constexpr LONG c_def_height = 320;
 constexpr UINT c_refresh_timer_id = 1;
 
 static HINSTANCE g_hinst = 0;
@@ -107,43 +109,87 @@ void SizeTracker::OnCreate(HWND hwnd)
 {
     assert(!m_hwnd);
 
+    constexpr DWORD c_flags = SWP_NOACTIVATE|SWP_NOZORDER|SWP_NOOWNERZORDER;
+
     m_hwnd = hwnd;
     m_dpi = __GetDpiForWindow(hwnd);
     m_resized = false;
 
-    LONG cx = ReadRegLong(TEXT("WindowWidth"), 0);
-    LONG cy = ReadRegLong(TEXT("WindowHeight"), 0);
-    const bool maximized = !!ReadRegLong(TEXT("Maximized"), false);
+    RECT rcOriginal;
+    GetWindowRect(hwnd, &rcOriginal);
 
     MONITORINFO info = { sizeof(info) };
-    HMONITOR hmon = MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTOPRIMARY);
-    GetMonitorInfo(hmon, &info);
+    {
+        POINT ptMonitor;
+        ptMonitor.x = ReadRegLong(TEXT("MonitorX"), CW_USEDEFAULT);
+        ptMonitor.y = ReadRegLong(TEXT("MonitorY"), CW_USEDEFAULT);
 
-    if (cx > 0)
-        cx = m_dpi.Scale(cx);
-    if (cy > 0)
-        cy = m_dpi.Scale(cy);
+        HMONITOR hmon;
+        const bool use_hwnd = (ptMonitor.x == CW_USEDEFAULT || ptMonitor.y == CW_USEDEFAULT);
+        if (use_hwnd)
+            hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+        else
+            hmon = MonitorFromPoint(ptMonitor, MONITOR_DEFAULTTOPRIMARY);
+        GetMonitorInfo(hmon, &info);
 
-    cx = std::min<LONG>(cx, info.rcWork.right - info.rcWork.left);
-    cy = std::min<LONG>(cy, info.rcWork.bottom - info.rcWork.top);
-    cx = std::max<LONG>(cx, m_dpi.Scale(480));
-    cy = std::max<LONG>(cy, m_dpi.Scale(320));
+        if (!use_hwnd)
+        {
+            RECT rc;
+            rc.left = info.rcWork.left + (info.rcWork.right - info.rcWork.left) / 4;
+            rc.right = info.rcWork.right - (info.rcWork.right - info.rcWork.left) / 4;
+            rc.top = info.rcWork.top + (info.rcWork.bottom - info.rcWork.top) / 4;
+            rc.bottom = info.rcWork.bottom - (info.rcWork.bottom - info.rcWork.top) / 4;
+            SetWindowPos(hwnd, NULL, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, c_flags);
 
-// TODO: restore position also.
-#if 0
-    const LONG xx = info.rcWork.left + ((info.rcWork.right - info.rcWork.left) - cx) / 2;
-    const LONG yy = info.rcWork.top + ((info.rcWork.bottom - info.rcWork.top) - cy) / 2;
-#else
+            // m_dpi should get updated by WM_DPICHANGED inside SetWindowPos
+            // when appropriate.
+            assert(m_dpi.IsDpiEqual(__GetDpiForWindow(hwnd)));
+        }
+    }
+
+    const LONG xx = ReadRegLong(TEXT("WindowLeftRatio"), CW_USEDEFAULT);
+    const LONG yy = ReadRegLong(TEXT("WindowTopRatio"), CW_USEDEFAULT);
+    LONG cx96 = ReadRegLong(TEXT("WindowWidth"), CW_USEDEFAULT);
+    LONG cy96 = ReadRegLong(TEXT("WindowHeight"), CW_USEDEFAULT);
+    const bool maximized = !!ReadRegLong(TEXT("Maximized"), false);
+
+    RECT rcWindow;
+    GetWindowRect(hwnd, &rcWindow);
+
     RECT rc;
-    GetWindowRect(m_hwnd, &rc);
-    const LONG xx = rc.left;
-    const LONG yy = rc.top;
-#endif
+    if (xx == CW_USEDEFAULT || yy == CW_USEDEFAULT)
+    {
+        rc.left = rcWindow.left;
+        rc.top = rcWindow.top;
+    }
+    else
+    {
+        rc.left = info.rcWork.left + ((xx >= 0) ? xx * (info.rcWork.right - info.rcWork.left) / 50000 : 0);
+        rc.top = info.rcWork.top + ((yy >= 0) ? yy * (info.rcMonitor.bottom - info.rcMonitor.top) / 50000 : 0);
+    }
+    if (cx96 == CW_USEDEFAULT || cy96 == CW_USEDEFAULT)
+    {
+        cx96 = c_def_width;
+        cy96 = c_def_height;
+    }
+    rc.right = rc.left + m_dpi.Scale(cx96);
+    rc.bottom = rc.top + m_dpi.Scale(cy96);
 
-    SetWindowPos(m_hwnd, 0, xx, yy, cx, cy, SWP_NOZORDER);
-    GetWindowRect(m_hwnd, &m_rcRestore);
+    if (rc.right > info.rcWork.right)
+        OffsetRect(&rc, info.rcWork.right - rc.right, 0);
+    if (rc.bottom > info.rcWork.bottom)
+        OffsetRect(&rc, 0, info.rcWork.bottom - rc.bottom);
+    if (rc.left < info.rcWork.left)
+        OffsetRect(&rc, info.rcWork.left - rc.left, 0);
+    if (rc.top < info.rcWork.top)
+        OffsetRect(&rc, 0, info.rcWork.top - rc.top);
+    rc.right = std::min<LONG>(rc.right, info.rcWork.right);
+    rc.bottom = std::min<LONG>(rc.bottom, info.rcWork.bottom);
+    SetWindowPos(hwnd, 0, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, c_flags);
 
-    ShowWindow(m_hwnd, m_maximized ? SW_MAXIMIZE : SW_NORMAL);
+    GetWindowRect(hwnd, &m_rcRestore);
+
+    ShowWindow(hwnd, m_maximized ? SW_MAXIMIZE : SW_NORMAL);
 }
 
 void SizeTracker::OnSize()
@@ -179,11 +225,16 @@ void SizeTracker::OnDpiChanged(const DpiScaler& dpi)
 
 void SizeTracker::OnDestroy()
 {
-    const LONG cx = m_dpi.ScaleTo(m_rcRestore.right - m_rcRestore.left, 96);
-    const LONG cy = m_dpi.ScaleTo(m_rcRestore.bottom - m_rcRestore.top, 96);
+    MONITORINFO info = { sizeof(info) };
+    HMONITOR hmon = MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST);
+    GetMonitorInfo(hmon, &info);
 
-    WriteRegLong(TEXT("WindowWidth"), cx);
-    WriteRegLong(TEXT("WindowHeight"), cy);
+    WriteRegLong(TEXT("MonitorX"), (info.rcMonitor.left + info.rcMonitor.right) / 2);
+    WriteRegLong(TEXT("MonitorY"), (info.rcMonitor.top + info.rcMonitor.bottom) / 2);
+    WriteRegLong(TEXT("WindowLeftRatio"), (m_rcRestore.left - info.rcWork.left) * 50000 / (info.rcWork.right - info.rcWork.left));
+    WriteRegLong(TEXT("WindowTopRatio"), (m_rcRestore.top - info.rcWork.top) * 50000 / (info.rcWork.bottom - info.rcWork.top));
+    WriteRegLong(TEXT("WindowWidth"), m_dpi.ScaleTo(m_rcRestore.right - m_rcRestore.left, 96));
+    WriteRegLong(TEXT("WindowHeight"), m_dpi.ScaleTo(m_rcRestore.bottom - m_rcRestore.top, 96));
     WriteRegLong(TEXT("Maximized"), m_maximized);
 
     m_resized = false;
@@ -362,6 +413,8 @@ void Zoomin::OnCreate(HWND hwnd)
 
 void Zoomin::OnDestroy()
 {
+    m_sizeTracker.OnDestroy();
+
     WriteRegLong(TEXT("PointX"), m_pt.x);
     WriteRegLong(TEXT("PointY"), m_pt.y);
     WriteRegLong(TEXT("ZoomFactor"), m_factor);
