@@ -640,7 +640,7 @@ void Zoomin::Init()
 void Zoomin::UpdateTitle()
 {
     WCHAR title[64];
-    wsprintfW(title, TEXT("Zoomin  \u00b7  %ux"), m_factor);
+    wsprintfW(title, TEXT("Zoomin \u00b7 %ux"), m_factor);
     SetWindowText(m_hwnd, title);
 }
 
