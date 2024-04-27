@@ -62,17 +62,18 @@ BEGIN
     PUSHBUTTON      "Cancel", IDCANCEL, 132, 112, 40, 14
 END
 
-IDD_ABOUT DIALOG 10, 10, 180, 106
+IDD_ABOUT DIALOG 10, 10, 180, 118
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "About"
 FONT 8, "Segoe UI"
 BEGIN
-    LTEXT           "", IDC_VERSION, 8, 8, 164, 10, SS_CENTER
+    ICON            IDI_MAIN, -1, 8, 8, 20, 20
+    LTEXT           "", IDC_VERSION, 32, 12, 116, 10, SS_CENTER
 
-    LTEXT           "", IDC_COPYRIGHT, 8, 32, 164, 10, SS_CENTER
-    LTEXT           "Distributed under the MIT License.", -1, 8, 42, 164, 10, SS_CENTER
-    PUSHBUTTON      "Visit the GitHub &repository", IDC_REPO, 36, 54, 108, 14
+    LTEXT           "", IDC_COPYRIGHT, 8, 44, 164, 10, SS_CENTER
+    LTEXT           "Distributed under the MIT License.", -1, 8, 54, 164, 10, SS_CENTER
+    PUSHBUTTON      "Visit the GitHub &repository", IDC_REPO, 36, 68, 108, 14
 
-    DEFPUSHBUTTON   "&OK", IDOK, 70, 84, 40, 14
+    DEFPUSHBUTTON   "&OK", IDOK, 70, 96, 40, 14
 END
 
