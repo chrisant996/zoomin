@@ -323,7 +323,12 @@ LRESULT CALLBACK Zoomin::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         s_zoomin.OnSize();
         goto LDefault;
     case WM_DPICHANGED:
-        s_zoomin.OnDpiChanged(DpiScaler(wParam));
+        {
+            const RECT& rc = *LPCRECT(lParam);
+            const DWORD c_flags = SWP_NOACTIVATE|SWP_NOZORDER|SWP_NOOWNERZORDER|SWP_DRAWFRAME;
+            s_zoomin.OnDpiChanged(DpiScaler(wParam));
+            SetWindowPos(hwnd, NULL, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, c_flags);
+        }
         break;
 
     case WM_CREATE:
