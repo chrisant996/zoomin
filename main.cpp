@@ -157,7 +157,7 @@ void SizeTracker::OnCreate(HWND hwnd)
     else
     {
         rc.left = info.rcWork.left + ((xx >= 0) ? xx * (info.rcWork.right - info.rcWork.left) / 50000 : 0);
-        rc.top = info.rcWork.top + ((yy >= 0) ? yy * (info.rcMonitor.bottom - info.rcMonitor.top) / 50000 : 0);
+        rc.top = info.rcWork.top + ((yy >= 0) ? yy * (info.rcWork.bottom - info.rcWork.top) / 50000 : 0);
     }
     if (cx96 == CW_USEDEFAULT || cy96 == CW_USEDEFAULT)
     {
