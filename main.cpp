@@ -292,6 +292,7 @@ private:
     void OnKeyDown(WPARAM wParam, LPARAM lParam);
     void OnInitMenuPopup(HMENU hmenu);
     bool OnCommand(WORD id, WORD code, HWND hwndCtrl);
+    LRESULT OnNotify(WPARAM wParam, LPARAM lParam);
     void OnSize();
     void OnDpiChanged(const DpiScaler& dpi);
 
@@ -308,12 +309,14 @@ private:
     void InvertReticle();
     void PaintZoomRect(HDC hdc=NULL);
     void CopyZoomContent();
+    void RelayEvent(UINT msg, WPARAM wParam, LPARAM lParam);
 
     static INT_PTR CALLBACK OptionsDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
     static INT_PTR CALLBACK AboutDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 private:
     HWND m_hwnd = NULL;
+    HWND m_tooltips = NULL;
     HPALETTE m_hpal = NULL;
     DpiScaler m_dpi;
     bool m_show_gridlines[2] = {};
@@ -347,8 +350,12 @@ LRESULT CALLBACK Zoomin::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         s_zoomin.OnButtonDown(lParam);
         break;
     case WM_MOUSEMOVE:
+        s_zoomin.RelayEvent(msg, wParam, lParam);
         s_zoomin.OnMouseMove(lParam);
         break;
+    case WM_NCMOUSEMOVE:
+        s_zoomin.RelayEvent(msg, wParam, lParam);
+        goto LDefault;
     case WM_LBUTTONUP:
     case WM_CANCELMODE:
         s_zoomin.OnCancelMode();
@@ -360,6 +367,9 @@ LRESULT CALLBACK Zoomin::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     case WM_KEYDOWN:
         s_zoomin.OnKeyDown(wParam, lParam);
         break;
+
+    case WM_NOTIFY:
+        return s_zoomin.OnNotify(wParam, lParam);
 
     case WM_INITMENUPOPUP:
         s_zoomin.OnInitMenuPopup(HMENU(wParam));
@@ -430,6 +440,12 @@ void Zoomin::OnDestroy()
         WriteRegLong(c_gridline_spacing_name[ii], m_gridline_spacing[ii]);
     }
 
+    if (m_tooltips)
+    {
+        DestroyWindow(m_tooltips);
+        m_tooltips = NULL;
+    }
+
     if (m_hpal)
     {
         DeleteObject(m_hpal);
@@ -461,6 +477,20 @@ void Zoomin::OnTimer(WPARAM wParam)
 
 void Zoomin::OnButtonDown(LPARAM lParam)
 {
+    POINT pt;
+    RECT rcClient;
+    pt.x = SHORT(LOWORD(lParam));
+    pt.y = SHORT(HIWORD(lParam));
+    GetClientRect(m_hwnd, &rcClient);
+    if (!PtInRect(&rcClient, pt))
+        return;
+
+    if (m_tooltips)
+    {
+        DestroyWindow(m_tooltips);
+        m_tooltips = nullptr;
+    }
+
     SetCapture(m_hwnd);
     m_captured = true;
 
@@ -605,6 +635,41 @@ bool Zoomin::OnCommand(WORD id, WORD code, HWND hwndCtrl)
     return true;
 }
 
+LRESULT Zoomin::OnNotify(WPARAM wParam, LPARAM lParam)
+{
+    NMHDR* const pnm = reinterpret_cast<NMHDR*>(lParam);
+
+    switch (pnm->code)
+    {
+    case TTN_SHOW:
+        {
+            TOOLINFO ti = { sizeof(ti) };
+            ti.uFlags = TTF_TRACK|TTF_ABSOLUTE;
+            ti.hwnd = m_hwnd;
+            ti.uId = 1;
+            const DWORD size = LOWORD(SendMessage(m_tooltips, TTM_GETBUBBLESIZE, 0, LPARAM(&ti)));
+
+            RECT rcWindow;
+            RECT rcTooltip;
+            GetWindowRect(m_hwnd, &rcWindow);
+            GetClientRect(m_hwnd, &rcTooltip);
+            MapWindowPoints(m_hwnd, NULL, LPPOINT(&rcTooltip), 2);
+            rcWindow.top = rcTooltip.top;
+
+            SendMessage(m_tooltips, TTM_ADJUSTRECT, false, (LPARAM)&rcTooltip);
+            rcTooltip.right = rcTooltip.left + LOWORD(size);
+            OffsetRect(&rcTooltip, -rcTooltip.left, -rcTooltip.top);
+            OffsetRect(&rcTooltip, (rcWindow.left + rcWindow.right) / 2 - (rcTooltip.right - rcTooltip.left) / 2, rcWindow.top + m_dpi.Scale(8));
+
+            SetWindowPos(m_tooltips, NULL, rcTooltip.left, rcTooltip.top, 0, 0, SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);
+            SetWindowLong(m_hwnd, DWLP_MSGRESULT, true);
+        }
+        return true;
+    }
+
+    return 0;
+}
+
 void Zoomin::OnSize()
 {
     m_sizeTracker.OnSize();
@@ -638,6 +703,22 @@ void Zoomin::Init()
     }
 
     m_hpal = CreatePhysicalPalette();
+
+    m_tooltips = CreateWindow(TOOLTIPS_CLASS, L"", WS_POPUP,
+                            CW_USEDEFAULT, CW_USEDEFAULT,
+                            CW_USEDEFAULT, CW_USEDEFAULT,
+                            m_hwnd, NULL, g_hinst, NULL);
+    if (m_tooltips)
+    {
+        TOOLINFO ti = { sizeof(ti) };
+        ti.uFlags = /*TTF_SUBCLASS|*/TTF_TRANSPARENT;
+        ti.hwnd = m_hwnd;
+        ti.uId = 1;
+        ti.rect.right = MAXINT;
+        ti.rect.bottom = MAXINT;
+        ti.lpszText = L"Click and drag to select zoomin area.";
+        SendMessage(m_tooltips, TTM_ADDTOOL, 0, LPARAM(&ti));
+    }
 }
 
 void Zoomin::UpdateTitle()
@@ -887,6 +968,19 @@ void Zoomin::CopyZoomContent()
         DeleteDC(hdcTo);
     if (hdcFrom)
         ReleaseDC(m_hwnd, hdcFrom);
+}
+
+void Zoomin::RelayEvent(UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (m_tooltips)
+    {
+        MSG relay = {};
+        relay.hwnd = m_hwnd;
+        relay.message = msg;
+        relay.wParam = wParam;
+        relay.lParam = lParam;
+        SendMessage(m_tooltips, TTM_RELAYEVENT, 0, LPARAM(&relay));
+    }
 }
 
 static void CenterDialog(HWND hwnd)
