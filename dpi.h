@@ -23,6 +23,7 @@ int HIDPIMulDiv(int x, int y, int z);
 WORD __GetHdcDpi(HDC hdc);
 WORD __GetDpiForSystem();
 WORD __GetDpiForWindow(HWND hwnd);
+WORD __GetDpiForMonitor(HMONITOR hmon);
 bool __IsHwndPerMonitorAware(HWND hwnd);
 
 int __GetSystemMetricsForDpi(int nIndex, UINT dpi);

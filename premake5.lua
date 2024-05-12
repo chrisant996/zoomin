@@ -33,6 +33,9 @@ workspace("zoomin")
     staticruntime("on")
     symbols("on")
     exceptionhandling("off")
+    -- If COMPOSITION is defined, then these are needed.
+    -- exceptionhandling("on")
+    -- cppdialect("C++17")
 
     init_configuration("release")
     init_configuration("debug")

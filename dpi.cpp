@@ -1,8 +1,10 @@
 // Copyright (c) 2023 Christopher Antos
 // License: http://opensource.org/licenses/MIT
 
+#include <stdlib.h>
 #include <windows.h>
 #include <windowsx.h>
+#include <shellscalingapi.h>
 #include <assert.h>
 
 #include "dpi.h"
@@ -32,6 +34,7 @@ public:
 
     WORD                    GetDpiForSystem();
     WORD                    GetDpiForWindow(HWND hwnd);
+    HRESULT                 GetDpiForMonitor(HMONITOR hmon, MONITOR_DPI_TYPE dpiType, UINT* dpiX, UINT* dpiY);
     int                     GetSystemMetricsForDpi(int nIndex, UINT dpi);
     bool                    SystemParametersInfoForDpi(UINT uiAction, UINT uiParam, PVOID pvParam, UINT fWinIni, UINT dpi);
     bool                    IsValidDpiAwarenessContext(DPI_AWARENESS_CONTEXT context);
@@ -47,14 +50,16 @@ private:
 private:
     DWORD                   m_dwErr = 0;
     HMODULE                 m_hLib = 0;
+    HMODULE                 m_hLibShellScaling = 0;
     bool                    m_fInitialized = false;
     union
     {
-        FARPROC	proc[10];
+        FARPROC	proc[11];
         struct
         {
             UINT (WINAPI* GetDpiForSystem)();
             UINT (WINAPI* GetDpiForWindow)(HWND hwnd);
+            HRESULT (WINAPI* GetDpiForMonitor)(HMONITOR hmon, MONITOR_DPI_TYPE dpiType, UINT* dpiX, UINT* dpiY);
             int (WINAPI* GetSystemMetricsForDpi)(int nIndex, UINT dpi);
             BOOL (WINAPI* SystemParametersInfoForDpi)(UINT uiAction, UINT uiParam, PVOID pvParam, UINT fWinIni, UINT dpi);
             BOOL (WINAPI* IsValidDpiAwarenessContext)(DPI_AWARENESS_CONTEXT context);
@@ -84,7 +89,8 @@ bool User32::Initialize()
     {
         m_fInitialized = true;
         m_hLib = LoadLibrary(TEXT("user32.dll"));
-        if (!m_hLib)
+        m_hLibShellScaling = LoadLibrary(TEXT("shellscalingapi.dll"));
+        if (!m_hLib || !m_hLibShellScaling)
         {
             m_dwErr = GetLastError();
         }
@@ -93,23 +99,25 @@ bool User32::Initialize()
             size_t cProcs = 0;
 
             if (!(m_user32.proc[cProcs++] = GetProcAddress(m_hLib, "GetDpiForSystem")))
-                m_dwErr = GetLastError();
+                m_dwErr = m_dwErr ? m_dwErr : GetLastError();
             if (!(m_user32.proc[cProcs++] = GetProcAddress(m_hLib, "GetDpiForWindow")))
-                m_dwErr = GetLastError();
+                m_dwErr = m_dwErr ? m_dwErr : GetLastError();
+            if (!(m_user32.proc[cProcs++] = GetProcAddress(m_hLibShellScaling, "GetDpiForMonitor")))
+                m_dwErr = m_dwErr ? m_dwErr : GetLastError();
             if (!(m_user32.proc[cProcs++] = GetProcAddress(m_hLib, "GetSystemMetricsForDpi")))
-                m_dwErr = GetLastError();
+                m_dwErr = m_dwErr ? m_dwErr : GetLastError();
             if (!(m_user32.proc[cProcs++] = GetProcAddress(m_hLib, "SystemParametersInfoForDpi")))
-                m_dwErr = GetLastError();
+                m_dwErr = m_dwErr ? m_dwErr : GetLastError();
             if (!(m_user32.proc[cProcs++] = GetProcAddress(m_hLib, "IsValidDpiAwarenessContext")))
-                m_dwErr = GetLastError();
+                m_dwErr = m_dwErr ? m_dwErr : GetLastError();
             if (!(m_user32.proc[cProcs++] = GetProcAddress(m_hLib, "AreDpiAwarenessContextsEqual")))
-                m_dwErr = GetLastError();
+                m_dwErr = m_dwErr ? m_dwErr : GetLastError();
             if (!(m_user32.proc[cProcs++] = GetProcAddress(m_hLib, "SetThreadDpiAwarenessContext")))
-                m_dwErr = GetLastError();
+                m_dwErr = m_dwErr ? m_dwErr : GetLastError();
             if (!(m_user32.proc[cProcs++] = GetProcAddress(m_hLib, "GetWindowDpiAwarenessContext")))
-                m_dwErr = GetLastError();
+                m_dwErr = m_dwErr ? m_dwErr : GetLastError();
             if (!(m_user32.proc[cProcs++] = GetProcAddress(m_hLib, "EnableNonClientDpiScaling")))
-                m_dwErr = GetLastError();
+                m_dwErr = m_dwErr ? m_dwErr : GetLastError();
             m_user32.proc[cProcs++] = GetProcAddress(m_hLib, "EnablePerMonitorMenuScaling"); // Optional: not an error if it's missing.
             assert(_countof(m_user32.proc) == cProcs);
         }
@@ -138,6 +146,14 @@ WORD User32::GetDpiForWindow(HWND hwnd)
     const WORD dpi = __GetHdcDpi(hdc);
     ReleaseDC(hwnd, hdc);
     return dpi;
+}
+
+HRESULT User32::GetDpiForMonitor(HMONITOR hmon, MONITOR_DPI_TYPE dpiType, UINT* dpiX, UINT* dpiY)
+{
+    if (m_user32.GetDpiForMonitor)
+        return m_user32.GetDpiForMonitor(hmon, dpiType, dpiX, dpiY);
+
+    return E_NOTIMPL;
 }
 
 int User32::GetSystemMetricsForDpi(int nIndex, UINT dpi)
@@ -252,6 +268,25 @@ WORD __GetDpiForSystem()
 WORD __GetDpiForWindow(HWND hwnd)
 {
     return WORD(g_user32.GetDpiForWindow(hwnd));
+}
+
+WORD __GetDpiForMonitor(HMONITOR hmon)
+{
+    UINT dpiX, dpiY;
+    if (SUCCEEDED(g_user32.GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI, &dpiX, &dpiY)))
+    {
+        assert(dpiX == dpiY);
+        if (dpiX)
+            return WORD(dpiX);
+    }
+
+    HDC hdc = GetDC(NULL);
+    dpiX = GetDeviceCaps(hdc, LOGPIXELSX);
+    ReleaseDC(NULL, hdc);
+    if (dpiX)
+        return WORD(dpiX);
+
+    return 96;
 }
 
 int __GetSystemMetricsForDpi(int nIndex, UINT dpi)

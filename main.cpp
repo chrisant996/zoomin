@@ -11,6 +11,7 @@
 #include <algorithm>
 
 #include "dpi.h"
+#include "reticle.h"
 #include "version.h"
 #include "res.h"
 
@@ -40,15 +41,6 @@ constexpr UINT c_refresh_timer_id = 1;
 
 static HINSTANCE g_hinst = 0;
 static HACCEL g_haccel = 0;
-
-template <typename T> T clamp(const T value, const T low, const T high)
-{
-    if (value < low)
-        return low;
-    if (value > high)
-        return high;
-    return value;
-}
 
 //------------------------------------------------------------------------------
 // Registry.
@@ -306,7 +298,6 @@ private:
     void SetInterval(UINT interval);
     void CalcZoomArea();
     bool GetZoomArea(RECT& rc);
-    void InvertReticle();
     void PaintZoomRect(HDC hdc=NULL);
     void CopyZoomContent();
     void RelayEvent(UINT msg, WPARAM wParam, LPARAM lParam);
@@ -328,6 +319,7 @@ private:
     bool m_captured = false;
     bool m_refresh = false;
     INT m_interval = 0;
+    std::unique_ptr<ZoomReticle> m_reticle;
     SizeTracker m_sizeTracker;
 };
 
@@ -485,6 +477,15 @@ void Zoomin::OnButtonDown(LPARAM lParam)
     if (!PtInRect(&rcClient, pt))
         return;
 
+    RECT rc;
+    if (!GetZoomArea(rc))
+        return;
+
+    m_reticle = CreateZoomReticle(g_hinst, rc.right - rc.left, rc.bottom - rc.top);
+    if (!m_reticle)
+        return;
+    m_reticle->InitReticle();
+
     if (m_tooltips)
     {
         DestroyWindow(m_tooltips);
@@ -495,9 +496,6 @@ void Zoomin::OnButtonDown(LPARAM lParam)
     m_captured = true;
 
     SetZoomPoint(lParam);
-    InvertReticle();
-
-    PaintZoomRect();
 }
 
 void Zoomin::OnMouseMove(LPARAM lParam)
@@ -505,11 +503,7 @@ void Zoomin::OnMouseMove(LPARAM lParam)
     if (!m_captured)
         return;
 
-    InvertReticle();
     SetZoomPoint(lParam);
-    InvertReticle();
-
-    PaintZoomRect();
 }
 
 void Zoomin::OnCancelMode()
@@ -517,7 +511,7 @@ void Zoomin::OnCancelMode()
     if (!m_captured)
         return;
 
-    InvertReticle();
+    m_reticle = nullptr;
 
     ReleaseCapture();
     m_captured = false;
@@ -558,6 +552,7 @@ void Zoomin::OnKeyDown(WPARAM wParam, LPARAM lParam)
     case VK_DOWN:
     case VK_LEFT:
     case VK_RIGHT:
+        if (m_pt.x != MAXINT && m_pt.y != MAXINT)
         {
             const bool shift = (GetKeyState(VK_SHIFT) < 0);
             const bool ctrl = (GetKeyState(VK_CONTROL) < 0);
@@ -741,14 +736,8 @@ void Zoomin::SetZoomPoint(LPARAM lParam)
 
 void Zoomin::SetZoomPoint(POINT pt)
 {
-    const bool invalid = (pt.x == MAXINT || pt.y == MAXINT);
-    if (invalid)
-    {
-        RECT rc;
-        GetWindowRect(m_hwnd, &rc);
-        pt.x = rc.left + (rc.right - rc.left) / 2;
-        pt.y = rc.top + (rc.bottom - rc.top) / 2;
-    }
+    if (pt.x == MAXINT || pt.y == MAXINT)
+        return;
 
     MONITORINFO mi = { sizeof(mi) };
     HMONITOR hmon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
@@ -760,15 +749,30 @@ void Zoomin::SetZoomPoint(POINT pt)
 
     m_rcMonitor = mi.rcMonitor;
 
-    if (invalid)
-    {
-        pt.x = m_rcMonitor.left + (m_rcMonitor.right - m_rcMonitor.left) / 2;
-        pt.y = m_rcMonitor.top + (m_rcMonitor.bottom - m_rcMonitor.top) / 2;
-    }
-
     m_pt.x = clamp(pt.x, m_rcMonitor.left, m_rcMonitor.right - 1);
     m_pt.y = clamp(pt.y, m_rcMonitor.top, m_rcMonitor.bottom - 1);
-    PaintZoomRect();
+
+    if (m_reticle)
+    {
+        RECT rc;
+        if (!GetZoomArea(rc))
+        {
+            assert(false); // This should be impossible.
+            return;
+        }
+
+        // GetZoomArea adjusts the rect to be fully on a single monitor.
+        // Update the point so the reticle position matches the zoom area.
+        pt.x = rc.left + (rc.right - rc.left) / 2;
+        pt.y = rc.top + (rc.bottom - rc.top) / 2;
+
+        m_reticle->UpdateReticlePosition(pt);
+        m_reticle->Invoke([](){ s_zoomin.PaintZoomRect(); });
+    }
+    else
+    {
+        PaintZoomRect();
+    }
 }
 
 void Zoomin::SetZoomFactor(INT factor)
@@ -834,6 +838,9 @@ void Zoomin::CalcZoomArea()
 
 bool Zoomin::GetZoomArea(RECT& rc)
 {
+    if (m_pt.x == MAXINT || m_pt.y == MAXINT)
+        return false;
+
     const LONG xx = clamp(m_pt.x, m_rcMonitor.left + m_area.cx / 2, m_rcMonitor.right - (m_area.cx - m_area.cx / 2));
     const LONG yy = clamp(m_pt.y, m_rcMonitor.top + m_area.cy / 2, m_rcMonitor.bottom - (m_area.cy - m_area.cy / 2));
 
@@ -843,30 +850,6 @@ bool Zoomin::GetZoomArea(RECT& rc)
     rc.bottom = rc.top + m_area.cy;
 
     return (rc.right > rc.left && rc.bottom > rc.top);
-}
-
-void Zoomin::InvertReticle()
-{
-    if (m_rcMonitor.right <= m_rcMonitor.left || m_rcMonitor.bottom <= m_rcMonitor.top)
-        return;
-
-    RECT rc;
-    if (!GetZoomArea(rc))
-        return;
-
-    const LONG thick = 1;
-    InflateRect(&rc, thick, thick);
-
-    HDC hdc = GetDC(NULL);
-    SaveDC(hdc);
-
-    PatBlt(hdc, rc.left, rc.top, thick, rc.bottom - rc.top, DSTINVERT);
-    PatBlt(hdc, rc.right - thick, rc.top, thick, rc.bottom - rc.top, DSTINVERT);
-    PatBlt(hdc, rc.left + thick, rc.top, (rc.right - thick) - (rc.left + thick), thick, DSTINVERT);
-    PatBlt(hdc, rc.left + thick, rc.bottom - thick, (rc.right - thick) - (rc.left + thick), thick, DSTINVERT);
-
-    RestoreDC(hdc, -1);
-    ReleaseDC(NULL, hdc);
 }
 
 void Zoomin::PaintZoomRect(HDC hdc)
