@@ -36,4 +36,11 @@
 #define IDC_VERSION             3006
 #define IDC_COPYRIGHT           3007
 #define IDC_REPO                3008
+#define IDC_GRIDLINES_COLOR     3009
+#define IDC_RETICLE_COLOR       3010
+#define IDC_OUTLINE_COLOR       3011
+#define IDC_GRIDLINES_SAMPLE    3012
+#define IDC_RETICLE_SAMPLE      3013
+#define IDC_OUTLINE_SAMPLE      3014
+#define IDC_RETICLE_OPACITY     3015
 

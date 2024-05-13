@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <commctrl.h>
+#include <commdlg.h>
 #include <shellapi.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -296,6 +297,7 @@ private:
     void SetZoomFactor(INT factor);
     void SetRefresh(bool refresh);
     void SetInterval(UINT interval);
+    void SetReticleOpacity(UINT opacity);
     void CalcZoomArea();
     bool GetZoomArea(RECT& rc);
     void PaintZoomRect(HDC hdc=NULL);
@@ -319,6 +321,10 @@ private:
     bool m_captured = false;
     bool m_refresh = false;
     INT m_interval = 0;
+    COLORREF m_crGridlines = RGB(0, 0, 0);
+    COLORREF m_crReticle = RGB(255, 0, 0);
+    COLORREF m_crReticleBorder = RGB(255, 255, 255);
+    INT m_reticleOpacity = 75;
     std::unique_ptr<ZoomReticle> m_reticle;
     SizeTracker m_sizeTracker;
 };
@@ -426,6 +432,11 @@ void Zoomin::OnDestroy()
     WriteRegLong(TEXT("RefreshEnabled"), m_refresh);
     WriteRegLong(TEXT("RefreshInterval"), m_interval);
 
+    WriteRegLong(TEXT("GridlinesColor"), m_crGridlines);
+    WriteRegLong(TEXT("ReticleColor"), m_crReticle);
+    WriteRegLong(TEXT("ReticleOutlineColor"), m_crReticleBorder);
+    WriteRegLong(TEXT("ReticleOpacity"), clamp<INT>(m_reticleOpacity, 10, 100));
+
     for (size_t ii = _countof(m_show_gridlines); ii--;)
     {
         WriteRegLong(c_show_gridlines_name[ii], m_show_gridlines[ii]);
@@ -481,7 +492,12 @@ void Zoomin::OnButtonDown(LPARAM lParam)
     if (!GetZoomArea(rc))
         return;
 
-    m_reticle = CreateZoomReticle(g_hinst, rc.right - rc.left, rc.bottom - rc.top);
+    ZoomReticleSettings settings;
+    settings.m_mainColor = m_crReticle;
+    settings.m_borderColor = m_crReticleBorder;
+    settings.m_opacity = m_reticleOpacity;
+
+    m_reticle = CreateZoomReticle(g_hinst, rc.right - rc.left, rc.bottom - rc.top, settings);
     if (!m_reticle)
         return;
     m_reticle->InitReticle();
@@ -691,6 +707,11 @@ void Zoomin::Init()
     SetInterval(ReadRegLong(TEXT("RefreshInterval"), 20));
     SetRefresh(!!ReadRegLong(TEXT("RefreshEnabled"), false));
 
+    m_crGridlines = ReadRegLong(L"GridlinesColor", RGB(0, 0, 0));
+    m_crReticle = ReadRegLong(L"ReticleColor", RGB(255, 0, 0));
+    m_crReticleBorder = ReadRegLong(L"ReticleOutlineColor", RGB(255, 255, 255));
+    SetReticleOpacity(ReadRegLong(L"ReticleOpacity", 75));
+
     for (size_t ii = _countof(m_show_gridlines); ii--;)
     {
         m_show_gridlines[ii] = !!ReadRegLong(c_show_gridlines_name[ii], false);
@@ -826,6 +847,11 @@ void Zoomin::SetInterval(UINT interval)
         SetTimer(m_hwnd, c_refresh_timer_id, std::max<INT>(m_interval, 1) * 100, nullptr);
 }
 
+void Zoomin::SetReticleOpacity(UINT opacity)
+{
+    m_reticleOpacity = clamp<INT>(opacity, 10, 100);
+}
+
 void Zoomin::CalcZoomArea()
 {
     RECT rc;
@@ -886,7 +912,7 @@ void Zoomin::PaintZoomRect(HDC hdc)
         const int thick = !ii ? 0 : (m_show_gridlines[0] ? 2 : 0);
         if (m_show_gridlines[ii] && factor > (thick ? 2 : 1))
         {
-            const HPEN hpenLine = CreatePen(PS_SOLID, thick, RGB(0, 0, 0));
+            const HPEN hpenLine = CreatePen(PS_SOLID, thick, m_crGridlines);
             const HPEN hpenOld = SelectPen(hdcTo, hpenLine);
             for (LONG xx = rcClient.left; xx <= rcClient.right; xx += factor * m_gridline_spacing[ii])
             {
@@ -982,6 +1008,10 @@ static void CenterDialog(HWND hwnd)
 
 INT_PTR CALLBACK Zoomin::OptionsDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    static COLORREF s_crGridlines;
+    static COLORREF s_crReticle;
+    static COLORREF s_crReticleBorder;
+
     switch (msg)
     {
     case WM_INITDIALOG:
@@ -994,12 +1024,82 @@ INT_PTR CALLBACK Zoomin::OptionsDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
         SetDlgItemInt(hwnd, IDC_REFRESH_INTERVAL, s_zoomin.m_interval, false);
         SetDlgItemInt(hwnd, IDC_MINOR_RESOLUTION, s_zoomin.m_gridline_spacing[0], false);
         SetDlgItemInt(hwnd, IDC_MAJOR_RESOLUTION, s_zoomin.m_gridline_spacing[1], false);
+        s_crGridlines = s_zoomin.m_crGridlines;
+        s_crReticle = s_zoomin.m_crReticle;
+        s_crReticleBorder = s_zoomin.m_crReticleBorder;
+        SetDlgItemInt(hwnd, IDC_RETICLE_OPACITY, s_zoomin.m_reticleOpacity, false);
         CenterDialog(hwnd);
         return true;
+
+    case WM_DRAWITEM:
+        {
+            COLORREF cr;
+            const DRAWITEMSTRUCT* p = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
+            switch (wParam)
+            {
+            case IDC_GRIDLINES_SAMPLE:      cr = s_crGridlines; break;
+            case IDC_RETICLE_SAMPLE:        cr = s_crReticle; break;
+            case IDC_OUTLINE_SAMPLE:        cr = s_crReticleBorder; break;
+            default:                        cr = RGB(255, 0, 255); break;
+            }
+
+            RECT rc = p->rcItem;
+            HBRUSH hbr = CreateSolidBrush(cr);
+            const HPEN old_pen = SelectPen(p->hDC, GetStockPen(BLACK_PEN));
+            Rectangle(p->hDC, rc.left, rc.top, rc.right, rc.bottom);
+            InflateRect(&rc, -1, -1);
+            FillRect(p->hDC, &rc, hbr);
+            SelectPen(p->hDC, old_pen);
+            DeleteObject(hbr);
+        }
+        break;
 
     case WM_COMMAND:
         switch (LOWORD(wParam))
         {
+        case IDC_GRIDLINES_COLOR:
+        case IDC_RETICLE_COLOR:
+        case IDC_OUTLINE_COLOR:
+            {
+                static bool s_init_colors = true;
+                static COLORREF s_custom_colors[16];
+                if (s_init_colors)
+                {
+                    s_init_colors = false;
+                    memset(&s_custom_colors, 255, sizeof(s_custom_colors));
+                }
+
+                CHOOSECOLOR cc = { sizeof(cc) };
+                cc.hwndOwner = hwnd;
+                cc.lpCustColors = s_custom_colors;
+                cc.Flags = CC_RGBINIT|CC_SOLIDCOLOR|CC_FULLOPEN;
+                switch (LOWORD(wParam))
+                {
+                case IDC_GRIDLINES_COLOR:   cc.rgbResult = s_crGridlines; break;
+                case IDC_RETICLE_COLOR:     cc.rgbResult = s_crReticle; break;
+                case IDC_OUTLINE_COLOR:     cc.rgbResult = s_crReticleBorder; break;
+                }
+                if (ChooseColor(&cc))
+                {
+                    switch (LOWORD(wParam))
+                    {
+                    case IDC_GRIDLINES_COLOR:
+                        s_crGridlines = cc.rgbResult;
+                        InvalidateRect(GetDlgItem(hwnd, IDC_GRIDLINES_SAMPLE), nullptr, true);
+                        break;
+                    case IDC_RETICLE_COLOR:
+                        s_crReticle = cc.rgbResult;
+                        InvalidateRect(GetDlgItem(hwnd, IDC_RETICLE_SAMPLE), nullptr, true);
+                        break;
+                    case IDC_OUTLINE_COLOR:
+                        s_crReticleBorder = cc.rgbResult;
+                        InvalidateRect(GetDlgItem(hwnd, IDC_OUTLINE_SAMPLE), nullptr, true);
+                        break;
+                    }
+                }
+            }
+            break;
+
         case IDOK:
             s_zoomin.SetInterval(GetDlgItemInt(hwnd, IDC_REFRESH_INTERVAL, nullptr, false));
             s_zoomin.m_gridline_spacing[0] = GetDlgItemInt(hwnd, IDC_MINOR_RESOLUTION, nullptr, false);
@@ -1007,6 +1107,14 @@ INT_PTR CALLBACK Zoomin::OptionsDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
             s_zoomin.SetRefresh(!!IsDlgButtonChecked(hwnd, IDC_ENABLE_REFRESH));
             s_zoomin.m_show_gridlines[0] = !!IsDlgButtonChecked(hwnd, IDC_ENABLE_MINORLINES);
             s_zoomin.m_show_gridlines[1] = !!IsDlgButtonChecked(hwnd, IDC_ENABLE_MAJORLINES);
+            if (s_zoomin.m_crGridlines != s_crGridlines)
+            {
+                s_zoomin.m_crGridlines = s_crGridlines;
+                InvalidateRect(s_zoomin.m_hwnd, nullptr, true);
+            }
+            s_zoomin.m_crReticle = s_crReticle;
+            s_zoomin.m_crReticleBorder = s_crReticleBorder;
+            s_zoomin.SetReticleOpacity(GetDlgItemInt(hwnd, IDC_RETICLE_OPACITY, nullptr, false));
             EndDialog(hwnd, true);
             break;
 
