@@ -53,10 +53,12 @@ public:
     bool InitReticle() override;
     void UpdateReticlePosition(const POINT& ptScreen) override;
     void Invoke(const std::function<void()>& func) override;
+    void Flash() override;
 
 private:
     void GetReticleRect(RECT& rc) const;
     void InvertReticle();
+    void ShowFourWindows(bool show);
 #ifdef COMPOSITION
     static LRESULT CALLBACK WndProcComposition(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) noexcept;
 #endif
@@ -434,18 +436,7 @@ void ZoomReticleImpl::UpdateReticlePosition(const POINT& ptScreen)
                 if (hdwp)
                     EndDeferWindowPos(hdwp);
 
-                if (!m_visible)
-                {
-                    ShowWindow(m_hwndLeft, SW_SHOWNOACTIVATE);
-                    ShowWindow(m_hwndTop, SW_SHOWNOACTIVATE);
-                    ShowWindow(m_hwndRight, SW_SHOWNOACTIVATE);
-                    ShowWindow(m_hwndBottom, SW_SHOWNOACTIVATE);
-                    UpdateWindow(m_hwndLeft);
-                    UpdateWindow(m_hwndTop);
-                    UpdateWindow(m_hwndRight);
-                    UpdateWindow(m_hwndBottom);
-                    m_visible = true;
-                }
+                ShowFourWindows(true);
             }
         }
         break;
@@ -550,6 +541,33 @@ void ZoomReticleImpl::Invoke(const std::function<void()>& func)
     }
 }
 
+void ZoomReticleImpl::Flash()
+{
+    for (int i = 8; i--;)
+    {
+        Sleep((i & 1) ? 100 : 50);
+
+        switch (m_mode)
+        {
+        case ZRM_XOR:
+            InvertReticle();
+            break;
+
+        case ZRM_FOURWINDOWS:
+            ShowFourWindows(!m_visible);
+            break;
+
+#ifdef COMPOSITION
+#error Flash is not yet implemented for compositor mode.
+        case ZRM_COMPOSITOR:
+            break;
+#endif
+        }
+    }
+
+    Sleep(500);
+}
+
 void ZoomReticleImpl::GetReticleRect(RECT& rc) const
 {
     rc.left = m_pt.x - (m_cx / 2);
@@ -579,6 +597,30 @@ void ZoomReticleImpl::InvertReticle()
 
     RestoreDC(hdc, -1);
     ReleaseDC(NULL, hdc);
+}
+
+void ZoomReticleImpl::ShowFourWindows(const bool show)
+{
+    assert(m_mode == ZRM_FOURWINDOWS);
+
+    if (show == m_visible)
+        return;
+
+    const int cmdShow = show ? SW_SHOWNOACTIVATE : SW_HIDE;
+    ShowWindow(m_hwndLeft, cmdShow);
+    ShowWindow(m_hwndTop, cmdShow);
+    ShowWindow(m_hwndRight, cmdShow);
+    ShowWindow(m_hwndBottom, cmdShow);
+
+    if (show)
+    {
+        UpdateWindow(m_hwndLeft);
+        UpdateWindow(m_hwndTop);
+        UpdateWindow(m_hwndRight);
+        UpdateWindow(m_hwndBottom);
+    }
+
+    m_visible = show;
 }
 
 #ifdef COMPOSITION

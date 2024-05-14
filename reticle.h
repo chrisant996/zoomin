@@ -32,6 +32,7 @@ public:
     virtual bool InitReticle() = 0;
     virtual void UpdateReticlePosition(const POINT& ptScreen) = 0;
     virtual void Invoke(const std::function<void()>& func) = 0;
+    virtual void Flash() = 0;
 };
 
 std::unique_ptr<ZoomReticle> CreateZoomReticle(HINSTANCE hinst, LONG cx, LONG cy, ZoomReticleSettings& settings = ZoomReticleSettings());

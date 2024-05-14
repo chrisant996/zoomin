@@ -299,7 +299,7 @@ private:
     void SetInterval(UINT interval);
     void SetReticleOpacity(UINT opacity);
     void CalcZoomArea();
-    bool GetZoomArea(RECT& rc);
+    bool GetZoomArea(RECT& rc, POINT* ptCenter=nullptr);
     void PaintZoomRect(HDC hdc=NULL);
     void CopyZoomContent();
     void RelayEvent(UINT msg, WPARAM wParam, LPARAM lParam);
@@ -639,6 +639,29 @@ bool Zoomin::OnCommand(WORD id, WORD code, HWND hwndCtrl)
         SetZoomFactor(m_factor + 1);
         break;
 
+    case IDM_FLASH_BORDER:
+        if (!m_reticle)
+        {
+            RECT rc;
+            POINT pt;
+            if (!GetZoomArea(rc, &pt))
+                break;
+
+            ZoomReticleSettings settings;
+            settings.m_mainColor = m_crReticle;
+            settings.m_borderColor = m_crReticleBorder;
+            settings.m_opacity = m_reticleOpacity;
+
+            std::unique_ptr<ZoomReticle> reticle = CreateZoomReticle(g_hinst, rc.right - rc.left, rc.bottom - rc.top, settings);
+            if (reticle)
+            {
+                reticle->InitReticle();
+                reticle->UpdateReticlePosition(pt);
+                reticle->Flash();
+            }
+        }
+        break;
+
     default:
         return false;
     }
@@ -776,16 +799,11 @@ void Zoomin::SetZoomPoint(POINT pt)
     if (m_reticle)
     {
         RECT rc;
-        if (!GetZoomArea(rc))
+        if (!GetZoomArea(rc, &pt))
         {
             assert(false); // This should be impossible.
             return;
         }
-
-        // GetZoomArea adjusts the rect to be fully on a single monitor.
-        // Update the point so the reticle position matches the zoom area.
-        pt.x = rc.left + (rc.right - rc.left) / 2;
-        pt.y = rc.top + (rc.bottom - rc.top) / 2;
 
         m_reticle->UpdateReticlePosition(pt);
         m_reticle->Invoke([](){ s_zoomin.PaintZoomRect(); });
@@ -862,7 +880,7 @@ void Zoomin::CalcZoomArea()
     UpdateTitle();
 }
 
-bool Zoomin::GetZoomArea(RECT& rc)
+bool Zoomin::GetZoomArea(RECT& rc, POINT* pt)
 {
     if (m_pt.x == MAXINT || m_pt.y == MAXINT)
         return false;
@@ -874,6 +892,14 @@ bool Zoomin::GetZoomArea(RECT& rc)
     rc.top = yy - m_area.cy / 2;
     rc.right = rc.left + m_area.cx;
     rc.bottom = rc.top + m_area.cy;
+
+    // GetZoomArea adjusts the rect to be fully on a single monitor.
+    // Update the point so the reticle position matches the zoom area.
+    if (pt)
+    {
+        pt->x = rc.left + (rc.right - rc.left) / 2;
+        pt->y = rc.top + (rc.bottom - rc.top) / 2;
+    }
 
     return (rc.right > rc.left && rc.bottom > rc.top);
 }

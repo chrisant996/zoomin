@@ -14,6 +14,8 @@ BEGIN
     BEGIN
         MENUITEM "&Copy\tCtrl-C",           IDM_EDIT_COPY
         MENUITEM SEPARATOR
+        MENUITEM "&Flash Zoom Area\tCtrl-F", IDM_FLASH_BORDER
+        MENUITEM SEPARATOR
         MENUITEM "&Refresh\tF5",            IDM_EDIT_REFRESH
     END
     POPUP "&Options"
@@ -35,6 +37,7 @@ BEGIN
     "+",                                    IDM_ZOOM_IN
     " ",                                    IDM_OPTIONS_GRIDLINES
     "^C",                                   IDM_EDIT_COPY
+    "^F",                                   IDM_FLASH_BORDER
     "^T",                                   IDM_REFRESH_ONOFF
 END
 

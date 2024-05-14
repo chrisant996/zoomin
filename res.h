@@ -25,6 +25,7 @@
 #define IDM_REFRESH_ONOFF       2005
 #define IDM_ZOOM_OUT            2006
 #define IDM_ZOOM_IN             2007
+#define IDM_FLASH_BORDER        2008
 
 // Controls.
 #define IDC_ENABLE_REFRESH      3000
