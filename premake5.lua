@@ -16,7 +16,7 @@ end
 --------------------------------------------------------------------------------
 local function define_exe(name, exekind)
     project(name)
-    flags("fatalwarnings")
+    fatalwarnings("all")
     language("c++")
     kind(exekind or "consoleapp")
 end
@@ -25,11 +25,11 @@ end
 --------------------------------------------------------------------------------
 workspace("zoomin")
     configurations({"debug", "release"})
-    platforms({"x32", "x64"})
+    platforms({"x86", "x64"})
     location(to)
 
     characterset("Unicode")
-    flags("NoManifest")
+    manifest("off")
     staticruntime("on")
     symbols("on")
     exceptionhandling("off")
@@ -53,21 +53,17 @@ workspace("zoomin")
         defines("NDEBUG")
 
     filter {"release", "action:vs*"}
-        flags("LinkTimeOptimization")
+        linktimeoptimization("on")
 
     filter "action:vs*"
         defines("_HAS_EXCEPTIONS=0")
 
 --------------------------------------------------------------------------------
-project("zoomin")
+define_exe("zoomin", "windowedapp")
     targetname("zoomin")
-    kind("windowedapp")
     links("comctl32")
     links("d2d1")
     links("dwrite")
-
-    language("c++")
-    flags("fatalwarnings")
 
     includedirs(".build/vs2022/bin") -- for the generated manifest.xml
     files("*.cpp")
@@ -356,7 +352,7 @@ newaction {
         end
 
         if sign then
-            sign_files({"x32\\zoomin.exe"})
+            sign_files({"x86\\zoomin.exe"})
         end
 
         -- Parse version.
@@ -368,7 +364,7 @@ newaction {
         mkdir(target_dir)
 
         -- Package the release and the pdbs separately.
-        os.chdir(src .. "/x32")
+        os.chdir(src .. "/x86")
         if have_7z then
             --exec(have_7z .. " a -r  " .. target_dir .. "zoomin-v" .. version .. "-symbols.zip  *.pdb")
             exec(have_7z .. " a -r  " .. target_dir .. "zoomin-v" .. version .. ".zip  *.exe")
